@@ -1,0 +1,16 @@
+apply plugin: 'scala'
+repositories {
+    mavenCentral()
+}
+
+dependencies {
+    compile "org.scala-lang:scala-library:${gradle.scala.version}"
+
+    compile 'com.typesafe.akka:akka-actor_2.12:2.5.2'
+    compile 'com.typesafe.akka:akka-slf4j_2.12:2.5.2'
+    compile 'com.typesafe.akka:akka-http-core_2.12:10.0.7'
+    compile 'com.typesafe.akka:akka-http-spray-json_2.12:10.0.7'
+    compile 'ch.qos.logback:logback-classic:1.1.7'
+    compile 'com.trueaccord.scalapb:scalapb-runtime_2.12:0.6.0-pre4'
+}
+
