@@ -1,16 +1,35 @@
 apply plugin: 'scala'
+apply plugin: 'idea'
 repositories {
     mavenCentral()
 }
 
+ext {
+    scalaVersion = "2.12"
+    akkaVersion = "2.5.1"
+    akkaHttpVersion = "10.0.6"
+}
+
 dependencies {
     compile "org.scala-lang:scala-library:${gradle.scala.version}"
+    //akka
+    compile "com.typesafe.akka:akka-actor_${scalaVersion}:${akkaVersion}"
+    compile "com.typesafe.akka:akka-stream_${scalaVersion}:${akkaVersion}"
+    compile "com.typesafe.akka:akka-slf4j_${scalaVersion}:${akkaVersion}"
 
-    compile 'com.typesafe.akka:akka-actor_2.12:2.5.2'
-    compile 'com.typesafe.akka:akka-slf4j_2.12:2.5.2'
-    compile 'com.typesafe.akka:akka-http-core_2.12:10.0.7'
-    compile 'com.typesafe.akka:akka-http-spray-json_2.12:10.0.7'
-    compile 'ch.qos.logback:logback-classic:1.1.7'
-    compile 'com.trueaccord.scalapb:scalapb-runtime_2.12:0.6.0-pre4'
+    //akka-http
+    compile "com.typesafe.akka:akka-http_${scalaVersion}:${akkaHttpVersion}"
+    compile "com.typesafe.akka:akka-http-spray-json_${scalaVersion}:${akkaHttpVersion}"
+    compile "ch.qos.logback:logback-classic:1.1.7"
+
+    //for mesos
+    compile "org.apache.mesos:mesos:1.0.0"
+    //for recordIO
+    compile "com.lightbend.akka:akka-stream-alpakka-simple-codecs_${scalaVersion}:0.9"
+    //for JSON printing of protobuf
+    compile "com.google.protobuf:protobuf-java-util:3.3.1"
+
+
+
 }
 
