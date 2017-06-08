@@ -1,5 +1,5 @@
 
-rootProject.name = 'mesos-invoker-scala'
+rootProject.name = 'mesos-client-scala'
 //need scala 2.12 to use java 8 lambdas...
 gradle.ext.scala = [
     version: '2.12.2',

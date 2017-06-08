@@ -15,11 +15,11 @@ import scala.concurrent.{Await, Future}
 /**
   * Created by tnorris on 6/5/17.
   */
-class WhiskFramework {
+class SampleFramework {
 
 }
 
-object WhiskFramework {
+object SampleFramework {
 
 
   def main(args: Array[String]): Unit = {
