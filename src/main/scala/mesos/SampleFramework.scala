@@ -8,10 +8,15 @@ import akka.actor.{ActorSystem, CoordinatedShutdown}
 import akka.pattern.ask
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
-import org.apache.mesos.v1.Protos.{AgentID, CommandInfo, Environment, Resource, TaskID, TaskInfo, TaskStatus, Value}
+import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo
+import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.PortMapping
+import org.apache.mesos.v1.Protos.Value.Ranges
+import org.apache.mesos.v1.Protos.{CommandInfo, ContainerInfo, Environment, Offer, Resource, TaskID, TaskInfo, TaskStatus, Value}
 
+import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
+import scala.util.{Failure, Success}
 /**
   * Created by tnorris on 6/5/17.
   */
@@ -39,54 +44,33 @@ object SampleFramework {
       "whisk-invoker-"+UUID.randomUUID(),
       "whisk-framework",
       "http://localhost:5050",
-      "*"
+      "*",
+      taskBuilder = buildTask
     ))
 
     mesosClientActor ! Subscribe
 
     val taskId = s"task-0-${Instant.now.getEpochSecond}"
-    val task = TaskInfo.newBuilder
-      .setName("test")
-      .setTaskId(TaskID.newBuilder
-        .setValue(taskId))
-      .setAgentId(AgentID.newBuilder.setValue("fakeid").build())
-      .setCommand(CommandInfo.newBuilder
-        .setEnvironment(Environment.newBuilder
-          .addVariables(Environment.Variable.newBuilder
-            .setName("SLEEP_SECONDS")
-            .setValue("25")))
-        .setValue("env | sort && sleep $SLEEP_SECONDS"))
-      .addResources(Resource.newBuilder
-        .setName("cpus")
-        .setRole("*")
-        .setType(Value.Type.SCALAR)
-        .setScalar(Value.Scalar.newBuilder
-          .setValue(0.1)))
-      .addResources(Resource.newBuilder
-        .setName("mem")
-        .setRole("*")
-        .setType(Value.Type.SCALAR)
-        .setScalar(Value.Scalar.newBuilder
-          .setValue(24)))
-      .build
+
+    val task = TaskReqs(taskId, 0.1, 24, 8080)
+
+
     val launched:Future[TaskStatus] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskStatus]
 
-    launched.map(taskStatus => {
-      log.info(s"launched task with state ${taskStatus.getState}")
+    launched onComplete  {
+      case Success(taskStatus) =>
+        log.info(s"launched task with state ${taskStatus.getState}")
 
-      //schedule delete in 10 seconds
-      system.scheduler.scheduleOnce(Duration.create(10, TimeUnit.SECONDS),
-        () => {
-          mesosClientActor.ask(DeleteTask(taskId))(taskDeleteTimeout).mapTo[TaskStatus].map(taskStatus => {
-            log.info(s"task killed ended with state ${taskStatus.getState}")
-          })
-        }
-      )
-
-
-    })
-
-
+        //schedule delete in 10 seconds
+        system.scheduler.scheduleOnce(Duration.create(40, TimeUnit.SECONDS),
+          () => {
+            mesosClientActor.ask(DeleteTask(taskId))(taskDeleteTimeout).mapTo[TaskStatus].map(taskStatus => {
+              log.info(s"task killed ended with state ${taskStatus.getState}")
+            })
+          }
+        )
+      case Failure(t) => log.error(s"task launche failed ${t.getMessage}", t)
+    }
 
     //handle shutdown
     CoordinatedShutdown(system).addJvmShutdownHook {
@@ -97,5 +81,55 @@ object SampleFramework {
     }
 
   }
+  def buildTask(reqs:TaskReqs, offer:Offer):TaskInfo = {
+    val containerPort = reqs.ports
+    val hostPort = offer.getResourcesList.asScala
+      .filter(res => res.getName == "ports").iterator.next().getRanges.getRange(0).getBegin.toInt
+    val agentHost = offer.getHostname
+    val dockerImage = "trinitronx/python-simplehttpserver"
 
+    val task = TaskInfo.newBuilder
+      .setName("test")
+      .setTaskId(TaskID.newBuilder
+        .setValue(reqs.taskId))
+      .setAgentId(offer.getAgentId)
+      .setCommand(CommandInfo.newBuilder
+        .setEnvironment(Environment.newBuilder
+          .addVariables(Environment.Variable.newBuilder
+            .setName("__OW_API_HOST")
+            .setValue(agentHost)))
+        .setShell(false)
+        .build())
+      .setContainer(ContainerInfo.newBuilder
+        .setType(ContainerInfo.Type.DOCKER)
+        .setDocker(DockerInfo.newBuilder
+          .setImage(dockerImage)
+          .setNetwork(DockerInfo.Network.BRIDGE)
+          .addPortMappings(PortMapping.newBuilder
+            .setContainerPort(containerPort)
+            .setHostPort(hostPort)
+            .build)
+        ).build())
+        .addResources(Resource.newBuilder()
+          .setName("ports")
+          .setType(Value.Type.RANGES)
+          .setRanges(Ranges.newBuilder()
+              .addRange(Value.Range.newBuilder()
+                .setBegin(hostPort)
+                .setEnd(hostPort))))
+      .addResources(Resource.newBuilder
+        .setName("cpus")
+        .setRole("*")
+        .setType(Value.Type.SCALAR)
+        .setScalar(Value.Scalar.newBuilder
+          .setValue(reqs.cpus)))
+      .addResources(Resource.newBuilder
+        .setName("mem")
+        .setRole("*")
+        .setType(Value.Type.SCALAR)
+        .setScalar(Value.Scalar.newBuilder
+          .setValue(reqs.mem)))
+      .build
+    task
+  }
 }

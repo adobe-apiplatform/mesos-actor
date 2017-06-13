@@ -30,7 +30,7 @@ import scala.concurrent.{ExecutionContext, Future, Promise}
   */
 
 //control messages
-case class SubmitTask(task:TaskInfo)
+case class SubmitTask(task:TaskReqs)
 case class DeleteTask(taskId:String)
 case class Reconcile(tasks:Iterable[TaskRecoveryDetail])
 case object Subscribe
@@ -38,9 +38,12 @@ case object Teardown
 //events
 case object TeardownComplete
 case class TaskRecoveryDetail(taskId:String, agentId:String)
+//data
+case class TaskReqs(taskId:String, cpus:Double, mem:Int, ports:Int)
+
 
 //TODO: mesos authentication
-class MesosClientActor (val id:String, val frameworkName:String, val master:String, val role:String, val taskMatcher:(String, Iterable[TaskInfo], Iterable[Offer]) => Map[OfferID,Seq[TaskInfo]])
+class MesosClientActor (val id:String, val frameworkName:String, val master:String, val role:String, val taskMatcher:(String, Iterable[TaskReqs], Iterable[Offer], (TaskReqs,Offer) => TaskInfo) => Map[OfferID,Seq[TaskInfo]], val taskBuilder:(TaskReqs,Offer) => TaskInfo)
   extends Actor with ActorLogging {
   implicit val ec:ExecutionContext = context.dispatcher
   implicit val system:ActorSystem = context.system
@@ -52,10 +55,10 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
   private val cpusPerTask = 0.1
   //TODO: handle redirect to master see https://github.com/mesosphere/mesos-rxjava/blob/d6fd040af3322552012fb3dcf61debb9886adbf3/mesos-rxjava-client/src/main/java/com/mesosphere/mesos/rx/java/MesosClient.java#L167
   private val mesosUri = URI.create(s"${master}/api/v1/scheduler")
-  private var pendingTaskInfo:Map[TaskID,TaskInfo] = Map()
-  private var pendingTaskPromises:Map[TaskID,Promise[TaskStatus]] = Map()
-  private var deleteTaskPromises:Map[TaskID, Promise[TaskStatus]] = Map()
-  private var taskStatuses:Map[TaskID, TaskStatus] = Map()
+  private var pendingTaskInfo:Map[String,TaskReqs] = Map()
+  private var pendingTaskPromises:Map[String,Promise[TaskStatus]] = Map()
+  private var deleteTaskPromises:Map[String, Promise[TaskStatus]] = Map()
+  private var taskStatuses:Map[String, TaskStatus] = Map()
 
   //TODO: FSM for handling subscribing, subscribed, failed, etc states
   override def receive: Receive = {
@@ -65,16 +68,16 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
     }
     case SubmitTask(task) => {
       val taskPromise = Promise[TaskStatus]()
-      pendingTaskPromises += (task.getTaskId -> taskPromise)
-      pendingTaskInfo += (task.getTaskId -> task)
+      pendingTaskPromises += (task.taskId -> taskPromise)
+      pendingTaskInfo += (task.taskId -> task)
       taskPromise.future.pipeTo(sender())
     }
     case DeleteTask(taskId) => {
       val taskID = TaskID.newBuilder().setValue(taskId).build()
       val taskPromise = Promise[TaskStatus]()
-      taskStatuses.get(taskID) match {
+      taskStatuses.get(taskID.getValue) match {
         case Some(taskStatus) =>
-          deleteTaskPromises += (taskID -> taskPromise)
+          deleteTaskPromises += (taskID.getValue -> taskPromise)
           kill(taskID, taskStatus.getAgentId)
         case None =>
           taskPromise.failure(new Exception(s"no task was running with id ${taskId}"))
@@ -98,16 +101,16 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
   def handleUpdate(event: Update) = {
     log.info(s"received update for ${event.getStatus.getTaskId} in state ${event.getStatus.getState}")
 
-    taskStatuses += (event.getStatus.getTaskId -> event.getStatus)
-    pendingTaskPromises.get(event.getStatus.getTaskId) match {
+    taskStatuses += (event.getStatus.getTaskId.getValue -> event.getStatus)
+    pendingTaskPromises.get(event.getStatus.getTaskId.getValue) match {
       case Some(promise) => {
         event.getStatus.getState match {
           case TaskState.TASK_RUNNING =>
             promise.success(event.getStatus)
-            pendingTaskPromises -= event.getStatus.getTaskId
+            pendingTaskPromises -= event.getStatus.getTaskId.getValue
           case TaskState.TASK_FINISHED | TaskState.TASK_KILLED | TaskState.TASK_KILLING | TaskState.TASK_LOST | TaskState.TASK_ERROR | TaskState.TASK_FAILED =>
             promise.failure(new Exception(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
-            pendingTaskPromises -= event.getStatus.getTaskId
+            pendingTaskPromises -= event.getStatus.getTaskId.getValue
           case TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
             log.info(s"task still launching task ${event.getStatus.getTaskId} (in state ${event.getStatus.getState}")
         }
@@ -115,14 +118,14 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
       case None => {
       }
     }
-    deleteTaskPromises.get(event.getStatus.getTaskId) match {
+    deleteTaskPromises.get(event.getStatus.getTaskId.getValue) match {
       case Some(promise) => {
         event.getStatus.getState match {
           case TaskState.TASK_KILLED  =>
             promise.success(event.getStatus)
-            deleteTaskPromises -= event.getStatus.getTaskId
+            deleteTaskPromises -= event.getStatus.getTaskId.getValue
           case TaskState.TASK_FINISHED | TaskState.TASK_LOST | TaskState.TASK_ERROR | TaskState.TASK_FAILED =>
-            deleteTaskPromises -= event.getStatus.getTaskId
+            deleteTaskPromises -= event.getStatus.getTaskId.getValue
             promise.failure(new Exception(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
           case TaskState.TASK_RUNNING | TaskState.TASK_KILLING | TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
             log.info(s"task still killing task ${event.getStatus.getTaskId} (in state ${event.getStatus.getState}")
@@ -169,7 +172,8 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
     val matchedTasks = taskMatcher(
       role,
       pendingTaskInfo.values,
-      event.getOffersList.asScala.toList)
+      event.getOffersList.asScala.toList,
+      taskBuilder)
 
 
     //if not tasks matched, we have to explicitly decline all offers
@@ -209,7 +213,7 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
       //todo: verify success
 
       matchedTasks.values.flatten.map(task => {
-        pendingTaskInfo -= task.getTaskId
+        pendingTaskInfo -= task.getTaskId.getValue
       })
 
     }
@@ -391,8 +395,10 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
 
 }
 object MesosClientActor {
-  def props(id:String, name:String, master:String, role:String, taskMatcher: (String, Iterable[TaskInfo], Iterable[Offer]) => Map[OfferID,Seq[TaskInfo]] = MesosClient.defaultTaskMatcher): Props =
-    Props(new MesosClientActor(id, name, master, role, taskMatcher))
+  def props(id:String, name:String, master:String, role:String,
+            taskMatcher: (String, Iterable[TaskReqs], Iterable[Offer], (TaskReqs, Offer) => TaskInfo) => Map[OfferID,Seq[TaskInfo]] = MesosClient.defaultTaskMatcher,
+            taskBuilder: (TaskReqs, Offer) => TaskInfo): Props =
+    Props(new MesosClientActor(id, name, master, role, taskMatcher, taskBuilder))
 }
 
 object MesosClient {
@@ -402,11 +408,11 @@ object MesosClient {
 
   //TODO: allow task persistence/reconcile
 
-  val defaultTaskMatcher: (String, Iterable[TaskInfo], Iterable[Offer]) => Map[OfferID,Seq[TaskInfo]] =
-    (role:String, t: Iterable[TaskInfo], o: Iterable[Offer]) => {
+  val defaultTaskMatcher: (String, Iterable[TaskReqs], Iterable[Offer], (TaskReqs, Offer) => TaskInfo) => Map[OfferID,Seq[TaskInfo]] =
+    (role:String, t: Iterable[TaskReqs], o: Iterable[Offer], builder:(TaskReqs, Offer) => TaskInfo) => {
       //we can launch many tasks on a single offer
 
-      var tasksInNeed:ListBuffer[TaskInfo] = t.to[ListBuffer]
+      var tasksInNeed:ListBuffer[TaskReqs] = t.to[ListBuffer]
       var result = Map[OfferID,Seq[TaskInfo]]()
       o.map(offer => {
 
@@ -427,11 +433,8 @@ object MesosClient {
           var acceptedTasks = ListBuffer[TaskInfo]()
           tasksInNeed.map(task => {
 
-            //TODO: validate task structure (exactly 1 resource each for cpus + mem)
-            //agentId should NOT be set (but must be set to some fake value)
-
-            val taskCpus = task.getResourcesList.asScala.filter(_.getName == "cpus").iterator.next().getScalar.getValue
-            val taskMem = task.getResourcesList.asScala.filter(_.getName == "mem").iterator.next().getScalar.getValue
+            val taskCpus = task.cpus
+            val taskMem = task.mem
 
             //check for a good fit
             if (remainingOfferCpus > taskCpus &&
@@ -439,7 +442,7 @@ object MesosClient {
               remainingOfferCpus -= taskCpus
               remainingOfferMem -= taskMem
               //move the task from InNeed to Accepted
-              acceptedTasks += TaskInfo.newBuilder(task).setAgentId(offer.getAgentId).build()
+              acceptedTasks += builder(task, offer)
               tasksInNeed -= task
             }
           })
