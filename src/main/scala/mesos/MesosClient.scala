@@ -36,11 +36,12 @@ case class Reconcile(tasks:Iterable[TaskRecoveryDetail])
 case object Subscribe
 case object Teardown
 //events
+case class SubscribeComplete()
 case object TeardownComplete
 case class TaskRecoveryDetail(taskId:String, agentId:String)
 //data
-case class TaskReqs(taskId:String, cpus:Double, mem:Int, ports:Int)
-
+case class TaskReqs(taskId:String, cpus:Double, mem:Int, port:Int)
+case class TaskDetails(taskInfo:TaskInfo, taskStatus:TaskStatus, hostname:String)
 
 //TODO: mesos authentication
 class MesosClientActor (val id:String, val frameworkName:String, val master:String, val role:String, val taskMatcher:(String, Iterable[TaskReqs], Iterable[Offer], (TaskReqs,Offer) => TaskInfo) => Map[OfferID,Seq[TaskInfo]], val taskBuilder:(TaskReqs,Offer) => TaskInfo)
@@ -56,29 +57,30 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
   //TODO: handle redirect to master see https://github.com/mesosphere/mesos-rxjava/blob/d6fd040af3322552012fb3dcf61debb9886adbf3/mesos-rxjava-client/src/main/java/com/mesosphere/mesos/rx/java/MesosClient.java#L167
   private val mesosUri = URI.create(s"${master}/api/v1/scheduler")
   private var pendingTaskInfo:Map[String,TaskReqs] = Map()
-  private var pendingTaskPromises:Map[String,Promise[TaskStatus]] = Map()
-  private var deleteTaskPromises:Map[String, Promise[TaskStatus]] = Map()
-  private var taskStatuses:Map[String, TaskStatus] = Map()
+  private var pendingTaskPromises:Map[String,Promise[TaskDetails]] = Map()
+  private var deleteTaskPromises:Map[String, Promise[TaskDetails]] = Map()
+  private var taskStatuses:Map[String, TaskDetails] = Map()
 
+  private var agentHostnames:Map[String,String] = Map()
   //TODO: FSM for handling subscribing, subscribed, failed, etc states
   override def receive: Receive = {
     //control messages
     case Subscribe => {
-      subscribe(self, frameworkID, frameworkName)
+      subscribe(self, frameworkID, frameworkName).pipeTo(sender())
     }
     case SubmitTask(task) => {
-      val taskPromise = Promise[TaskStatus]()
+      val taskPromise = Promise[TaskDetails]()
       pendingTaskPromises += (task.taskId -> taskPromise)
       pendingTaskInfo += (task.taskId -> task)
       taskPromise.future.pipeTo(sender())
     }
     case DeleteTask(taskId) => {
       val taskID = TaskID.newBuilder().setValue(taskId).build()
-      val taskPromise = Promise[TaskStatus]()
+      val taskPromise = Promise[TaskDetails]()
       taskStatuses.get(taskID.getValue) match {
-        case Some(taskStatus) =>
+        case Some(taskDetails) =>
           deleteTaskPromises += (taskID.getValue -> taskPromise)
-          kill(taskID, taskStatus.getAgentId)
+          kill(taskID, taskDetails.taskStatus.getAgentId)
         case None =>
           taskPromise.failure(new Exception(s"no task was running with id ${taskId}"))
       }
@@ -101,12 +103,14 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
   def handleUpdate(event: Update) = {
     log.info(s"received update for ${event.getStatus.getTaskId} in state ${event.getStatus.getState}")
 
-    taskStatuses += (event.getStatus.getTaskId.getValue -> event.getStatus)
+    val oldTaskDetails = taskStatuses(event.getStatus.getTaskId.getValue)
+    val newTaskDetails = TaskDetails(oldTaskDetails.taskInfo, event.getStatus, agentHostnames(event.getStatus.getAgentId.getValue))
+    taskStatuses += (event.getStatus.getTaskId.getValue -> newTaskDetails)
     pendingTaskPromises.get(event.getStatus.getTaskId.getValue) match {
       case Some(promise) => {
         event.getStatus.getState match {
           case TaskState.TASK_RUNNING =>
-            promise.success(event.getStatus)
+            promise.success(newTaskDetails)
             pendingTaskPromises -= event.getStatus.getTaskId.getValue
           case TaskState.TASK_FINISHED | TaskState.TASK_KILLED | TaskState.TASK_KILLING | TaskState.TASK_LOST | TaskState.TASK_ERROR | TaskState.TASK_FAILED =>
             promise.failure(new Exception(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
@@ -122,7 +126,7 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
       case Some(promise) => {
         event.getStatus.getState match {
           case TaskState.TASK_KILLED  =>
-            promise.success(event.getStatus)
+            promise.success(newTaskDetails)
             deleteTaskPromises -= event.getStatus.getTaskId.getValue
           case TaskState.TASK_FINISHED | TaskState.TASK_LOST | TaskState.TASK_ERROR | TaskState.TASK_FAILED =>
             deleteTaskPromises -= event.getStatus.getTaskId.getValue
@@ -132,6 +136,13 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
         }
       }
       case None => {
+      }
+    }
+    //if previous state was TASK_RUNNING, but is no longer, log the details
+    if (oldTaskDetails != null && oldTaskDetails.taskStatus != null){
+      if (oldTaskDetails.taskStatus.getState == TaskState.TASK_RUNNING &&
+        newTaskDetails.taskStatus.getState != TaskState.TASK_RUNNING) {
+        log.info(s"task ${newTaskDetails.taskStatus.getTaskId.getValue} changed from TASK_RUNNING ${toCompactJsonString(newTaskDetails.taskStatus)}")
       }
     }
     acknowledge(event.getStatus)
@@ -168,6 +179,16 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
 
     log.info(s"received ${event.getOffersList.size} offers: ${toCompactJsonString(event);}")
 
+
+    //update hostnames if needed
+    event.getOffersList.asScala.foreach (offer => {
+      val agentID = offer.getAgentId.getValue
+      val agentHostname = offer.getHostname
+      if (agentHostnames.getOrElse(agentID, "") != agentHostname){
+        log.info(s"noticed a new agent (or new hostname for existing agent) ${agentID} ${agentHostname}")
+        agentHostnames += (agentID -> agentHostname)
+      }
+    })
 
     val matchedTasks = taskMatcher(
       role,
@@ -214,6 +235,7 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
 
       matchedTasks.values.flatten.map(task => {
         pendingTaskInfo -= task.getTaskId.getValue
+        taskStatuses += (task.getTaskId.getValue -> TaskDetails(task, null, null))
       })
 
     }
@@ -242,7 +264,7 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
 
 
   val connectionFlow: Flow[HttpRequest, HttpResponse, Future[Http.OutgoingConnection]] = {
-    Http().outgoingConnection(host = "localhost", port = 5050)
+    Http().outgoingConnection(host = mesosUri.getHost, port = mesosUri.getPort)
   }
 
   def exec(call:Call): Future[HttpResponse] = {
@@ -344,10 +366,12 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
     exec(reconcileCall)
   }
 
-  def subscribe(mesosClientActor:ActorRef, frameworkID:FrameworkID, frameworkName:String):Unit = {
+  def subscribe(mesosClientActor:ActorRef, frameworkID:FrameworkID, frameworkName:String):Future[SubscribeComplete] = {
 
 
     import EventStreamUnmarshalling._
+
+    val result = Promise[SubscribeComplete]
 
     val subscribeCall = Call.newBuilder()
       .setType(Call.Type.SUBSCRIBE)
@@ -367,13 +391,27 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
     //see https://gist.github.com/ktoso/4dda7752bf6f4393d1ac
     //see https://tech.zalando.com/blog/about-akka-streams/?gh_src=4n3gxh1
     Http()
-      .singleRequest(Post("http://localhost:5050/api/v1/scheduler/subscribe")
+      .singleRequest(Post(s"${mesosUri}/subscribe")
         .withHeaders(RawHeader("Accept", "application/x-protobuf"),
           RawHeader("Connection", "close"))
         .withEntity(MesosClient.protobufContentType, subscribeCall.toByteArray))
       .flatMap(response => {
-        streamId = response.getHeader("Mesos-Stream-Id").get().value()
-        Unmarshal(response).to[Source[Event, NotUsed]]
+        if (response.status.isSuccess()){
+          log.debug(s"response: ${response} ")
+          val newStreamId = response.getHeader("Mesos-Stream-Id").get().value()
+          if (streamId == null){
+            log.info(s"setting new streamId ${newStreamId}")
+            streamId = newStreamId
+            result.success(SubscribeComplete())
+          } else if (streamId != newStreamId){
+            //TODO: do we need to handle StreamId changes?
+            log.warning(s"streamId has changed! ${streamId}  ${newStreamId}")
+          }
+          Unmarshal(response).to[Source[Event, NotUsed]]
+        } else {
+          //TODO: reconnect?
+          throw new Exception(s"subscribe response failed: ${response}")
+        }
       })
 
       .foreach(eventSource => {
@@ -387,10 +425,11 @@ class MesosClientActor (val id:String, val frameworkName:String, val master:Stri
         case Event.Type.HEARTBEAT => mesosClientActor ! event
         case Event.Type.SUBSCRIBED => mesosClientActor ! event.getSubscribed
         case Event.Type.UPDATE => mesosClientActor ! event.getUpdate
-        case event => log.warning(s"unhandled event ${event}")
+        case eventType => log.warning(s"unhandled event ${toCompactJsonString(event)}")
         //todo: handle other event types
       }
     }
+    result.future
   }
 
 }

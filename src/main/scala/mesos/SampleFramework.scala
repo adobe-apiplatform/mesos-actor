@@ -16,7 +16,8 @@ import org.apache.mesos.v1.Protos.{CommandInfo, ContainerInfo, Environment, Offe
 import scala.collection.JavaConverters._
 import scala.concurrent.duration._
 import scala.concurrent.{Await, Future}
-import scala.util.{Failure, Success}
+import scala.util.{Failure, Success, Try}
+
 /**
   * Created by tnorris on 6/5/17.
   */
@@ -35,6 +36,7 @@ object SampleFramework {
 
     val taskLaunchTimeout = Timeout(15 seconds)
     val taskDeleteTimeout = Timeout(10 seconds)
+    val subscribeTimeout = Timeout(5 seconds)
     val teardownTimeout = Timeout(5 seconds)
 
 
@@ -43,34 +45,44 @@ object SampleFramework {
     val mesosClientActor = system.actorOf(MesosClientActor.props(
       "whisk-invoker-"+UUID.randomUUID(),
       "whisk-framework",
-      "http://localhost:5050",
+      "http://192.168.99.100:5050",
       "*",
       taskBuilder = buildTask
     ))
 
-    mesosClientActor ! Subscribe
+    //mesosClientActor ! Subscribe
+
+    mesosClientActor.ask(Subscribe)(subscribeTimeout).mapTo[SubscribeComplete].onComplete(complete => {
+      log.info("subscribe completed successfully...")
+    })
 
     val taskId = s"task-0-${Instant.now.getEpochSecond}"
 
     val task = TaskReqs(taskId, 0.1, 24, 8080)
 
 
-    val launched:Future[TaskStatus] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskStatus]
+    val launched:Future[TaskDetails] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskDetails]
 
-    launched onComplete  {
-      case Success(taskStatus) =>
-        log.info(s"launched task with state ${taskStatus.getState}")
+    launched map { taskDetails =>
+//      val taskHost = taskDetails.taskStatus.getContainerStatus.getNetworkInfos(0).getIpAddresses(0)
+      val taskHost = taskDetails.hostname
+      val taskPort = taskDetails.taskInfo.getResourcesList.asScala.filter(_.getName == "ports").iterator.next().getRanges.getRange(0).getBegin.toInt
+      log.info(s"launched task with state ${taskDetails.taskStatus.getState} on host:port ${taskHost}:${taskPort}")
 
-        //schedule delete in 10 seconds
-        system.scheduler.scheduleOnce(Duration.create(40, TimeUnit.SECONDS),
-          () => {
-            mesosClientActor.ask(DeleteTask(taskId))(taskDeleteTimeout).mapTo[TaskStatus].map(taskStatus => {
-              log.info(s"task killed ended with state ${taskStatus.getState}")
-            })
-          }
-        )
-      case Failure(t) => log.error(s"task launche failed ${t.getMessage}", t)
+      //schedule delete in 10 seconds
+      system.scheduler.scheduleOnce(Duration.create(40, TimeUnit.SECONDS),
+        () => {
+          mesosClientActor.ask(DeleteTask(taskId))(taskDeleteTimeout).mapTo[TaskStatus].map(taskStatus => {
+            log.info(s"task killed ended with state ${taskStatus.getState}")
+          })
+        }
+      )
+    } recover {
+      case t => log.error(s"task launch failed ${t.getMessage}", t)
     }
+
+
+
 
     //handle shutdown
     CoordinatedShutdown(system).addJvmShutdownHook {
@@ -82,7 +94,7 @@ object SampleFramework {
 
   }
   def buildTask(reqs:TaskReqs, offer:Offer):TaskInfo = {
-    val containerPort = reqs.ports
+    val containerPort = reqs.port
     val hostPort = offer.getResourcesList.asScala
       .filter(res => res.getName == "ports").iterator.next().getRanges.getRange(0).getBegin.toInt
     val agentHost = offer.getHostname
