@@ -29,7 +29,8 @@ dependencies {
     //for JSON printing of protobuf
     compile "com.google.protobuf:protobuf-java-util:3.3.1"
 
-
+    testCompile 'org.scalatest:scalatest_2.11:3.0.1'
+    testCompile 'junit:junit:4.11'
 
 }
 

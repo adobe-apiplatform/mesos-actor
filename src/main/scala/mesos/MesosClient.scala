@@ -1,32 +1,59 @@
 package mesos
 
-import java.net.URI
-import java.util.Optional
-
 import akka.NotUsed
-import akka.actor.{Actor, ActorLogging, ActorRef, ActorSystem, Props}
+import akka.actor.Actor
+import akka.actor.ActorLogging
+import akka.actor.ActorRef
+import akka.actor.ActorSystem
+import akka.actor.Props
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.client.RequestBuilding.Post
 import akka.http.scaladsl.model.MediaType.Compressible
 import akka.http.scaladsl.model.headers.RawHeader
-import akka.http.scaladsl.model.{ContentType, HttpEntity, HttpRequest, HttpResponse, MediaType}
-import akka.http.scaladsl.unmarshalling.{FromEntityUnmarshaller, Unmarshal, Unmarshaller}
+import akka.http.scaladsl.model.ContentType
+import akka.http.scaladsl.model.HttpEntity
+import akka.http.scaladsl.model.HttpRequest
+import akka.http.scaladsl.model.HttpResponse
+import akka.http.scaladsl.model.MediaType
+import akka.http.scaladsl.unmarshalling.FromEntityUnmarshaller
+import akka.http.scaladsl.unmarshalling.Unmarshal
+import akka.http.scaladsl.unmarshalling.Unmarshaller
 import akka.pattern.pipe
 import akka.stream.alpakka.recordio.scaladsl.RecordIOFraming
-import akka.stream.scaladsl.{Flow, Sink, Source}
-import akka.stream.stage.{GraphStage, GraphStageLogic, InHandler, OutHandler}
-import akka.stream.{ActorMaterializer, Attributes, FlowShape, Inlet, Outlet}
+import akka.stream.scaladsl.Flow
+import akka.stream.scaladsl.Sink
+import akka.stream.scaladsl.Source
+import akka.stream.stage.GraphStage
+import akka.stream.stage.GraphStageLogic
+import akka.stream.stage.InHandler
+import akka.stream.stage.OutHandler
+import akka.stream.ActorMaterializer
+import akka.stream.Attributes
+import akka.stream.FlowShape
+import akka.stream.Inlet
+import akka.stream.Outlet
 import akka.util.ByteString
-import org.apache.mesos.v1.Protos.{AgentID, ExecutorID, FrameworkID, FrameworkInfo, Offer, OfferID, TaskID, TaskInfo, TaskState, TaskStatus}
+import java.net.URI
+import java.util.Optional
+import org.apache.mesos.v1.Protos.AgentID
+import org.apache.mesos.v1.Protos.ExecutorID
+import org.apache.mesos.v1.Protos.FrameworkID
+import org.apache.mesos.v1.Protos.FrameworkInfo
+import org.apache.mesos.v1.Protos.Offer
+import org.apache.mesos.v1.Protos.OfferID
+import org.apache.mesos.v1.Protos.TaskID
+import org.apache.mesos.v1.Protos.TaskInfo
+import org.apache.mesos.v1.Protos.TaskState
+import org.apache.mesos.v1.Protos.TaskStatus
 import org.apache.mesos.v1.scheduler.Protos.Call._
 import org.apache.mesos.v1.scheduler.Protos.Event._
-import org.apache.mesos.v1.scheduler.Protos.{Call, Event}
-
-import scala.collection.JavaConverters._
+import org.apache.mesos.v1.scheduler.Protos.Call
+import org.apache.mesos.v1.scheduler.Protos.Event
 import scala.collection.JavaConversions._
-
-import scala.collection.mutable.ListBuffer
-import scala.concurrent.{ExecutionContext, Future, Promise}
+import scala.collection.JavaConverters._
+import scala.concurrent.ExecutionContext
+import scala.concurrent.Future
+import scala.concurrent.Promise
 
 /**
  * Created by tnorris on 6/4/17.
@@ -56,8 +83,8 @@ case class TaskReqs(taskId: String, dockerImage: String, cpus: Double, mem: Int,
 case class TaskDetails(taskInfo: TaskInfo, taskStatus: TaskStatus = null, hostname: String = null)
 
 //TODO: mesos authentication
-class MesosClientActor(val id: String, val frameworkName: String, val master: String, val role: String, val taskMatcher: (String, Iterable[TaskReqs], Iterable[Offer], (TaskReqs, Offer, Int) => TaskInfo) => Map[OfferID, Seq[TaskInfo]],
-    val taskBuilder: (TaskReqs, Offer, Int) => TaskInfo)
+class MesosClientActor(val id: String, val frameworkName: String, val master: String, val role: String, val taskMatcher: TaskMatcher,
+    val taskBuilder: TaskBuilder)
         extends Actor with ActorLogging {
     implicit val ec: ExecutionContext = context.dispatcher
     implicit val system: ActorSystem = context.system
@@ -208,7 +235,7 @@ class MesosClientActor(val id: String, val frameworkName: String, val master: St
             }
         })
 
-        val matchedTasks = taskMatcher(
+        val matchedTasks = taskMatcher.matchTasksToOffers(
             role,
             pendingTaskInfo.values,
             event.getOffersList.asScala.toList,
@@ -459,8 +486,8 @@ class MesosClientActor(val id: String, val frameworkName: String, val master: St
 
 object MesosClientActor {
     def props(id: String, name: String, master: String, role: String,
-        taskMatcher: (String, Iterable[TaskReqs], Iterable[Offer], (TaskReqs, Offer, Int) => TaskInfo) => Map[OfferID, Seq[TaskInfo]] = MesosClient.defaultTaskMatcher,
-        taskBuilder: (TaskReqs, Offer, Int) => TaskInfo): Props =
+        taskMatcher: TaskMatcher = DefaultTaskMatcher,
+        taskBuilder: TaskBuilder = DefaultTaskBuilder): Props =
         Props(new MesosClientActor(id, name, master, role, taskMatcher, taskBuilder))
 }
 
@@ -469,68 +496,6 @@ object MesosClient {
     val protobufContentType = ContentType(MediaType.applicationBinary("x-protobuf", Compressible, "proto"))
 
     //TODO: allow task persistence/reconcile
-
-    val defaultTaskMatcher: (String, Iterable[TaskReqs], Iterable[Offer], (TaskReqs, Offer, Int) => TaskInfo) => Map[OfferID, Seq[TaskInfo]] =
-        (role: String, t: Iterable[TaskReqs], o: Iterable[Offer], builder: (TaskReqs, Offer, Int) => TaskInfo) => {
-            //we can launch many tasks on a single offer
-
-            var tasksInNeed: ListBuffer[TaskReqs] = t.to[ListBuffer]
-            var result = Map[OfferID, Seq[TaskInfo]]()
-            var portIndex = 0
-            var acceptedOfferAgent: String = null //accepted offers must reside on single agent: https://github.com/apache/mesos/blob/master/src/master/validation.cpp#L1768
-            o.map(offer => {
-
-                //TODO: manage explicit and default roles, similar to https://github.com/mesos/kafka/pull/103/files
-
-                val hasSomePorts = offer.getResourcesList.asScala
-                        .filter(res => res.getName == "ports").size > 0
-                if (!hasSomePorts) {
-                    //TODO: log info about skipping due to lack of ports...
-                }
-
-                val agentId = offer.getAgentId.getValue
-                if (hasSomePorts && (acceptedOfferAgent == null || acceptedOfferAgent == agentId)) {
-                    acceptedOfferAgent = agentId
-                    val resources = offer.getResourcesList.asScala
-                            .filter(_.getRole == role) //ignore resources with other roles
-                            .filter(res => Seq("cpus", "mem").contains(res.getName))
-                            .groupBy(_.getName)
-                            .mapValues(resources => {
-                                resources.iterator.next().getScalar.getValue
-                            })
-                    if (resources.size == 2) {
-                        var remainingOfferCpus = resources("cpus")
-                        var remainingOfferMem = resources("mem")
-                        var acceptedTasks = ListBuffer[TaskInfo]()
-                        tasksInNeed.map(task => {
-
-                            val taskCpus = task.cpus
-                            val taskMem = task.mem
-
-                            //check for a good fit
-                            if (remainingOfferCpus > taskCpus &&
-                                    remainingOfferMem > taskMem) {
-                                remainingOfferCpus -= taskCpus
-                                remainingOfferMem -= taskMem
-                                //move the task from InNeed to Accepted
-
-                                acceptedTasks += builder(task, offer, portIndex)
-                                portIndex += 1
-                                tasksInNeed -= task
-                            }
-                        })
-                        if (!acceptedTasks.isEmpty) {
-                            result += (offer.getId -> acceptedTasks)
-                        }
-                    }
-
-                } else {
-                    //log.info("ignoring offers for other slaves for now")
-                }
-                result
-            })
-            result
-        }
 
     def accept(frameworkId: FrameworkID, offerIds: java.lang.Iterable[OfferID], tasks: java.lang.Iterable[TaskInfo]): Call =
         Call.newBuilder
