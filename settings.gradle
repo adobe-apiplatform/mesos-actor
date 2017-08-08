@@ -2,6 +2,6 @@
 rootProject.name = 'mesos-client-scala'
 //need scala 2.12 to use java 8 lambdas...
 gradle.ext.scala = [
-    version: '2.12.2',
+    version: '2.11.8',
     compileFlags: ['-feature', '-unchecked', '-deprecation', '-Xfatal-warnings', '-Ywarn-unused-import']
 ]
