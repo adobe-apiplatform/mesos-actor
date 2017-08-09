@@ -17,12 +17,15 @@
 
 package mesos
 
-import akka.event.LoggingAdapter
-import org.apache.mesos.v1.Protos.Offer
-import org.apache.mesos.v1.Protos.OfferID
-import org.apache.mesos.v1.Protos.TaskInfo
+import org.apache.mesos.v1.scheduler.Protos.Event.Offers
 
-trait TaskMatcher {
-    def matchTasksToOffers(role: String, t: Iterable[TaskReqs], o: Iterable[Offer], builder: TaskBuilder)(implicit logger:LoggingAdapter): Map[OfferID, Seq[TaskInfo]]
+object ProtobufUtil {
+
+    def getOffers(jsonFile:String):Offers = {
+        val offerSource = scala.io.Source.fromInputStream(getClass.getResourceAsStream(jsonFile)).mkString
+        import com.google.protobuf.util.JsonFormat
+        val builder = Offers.newBuilder()
+        JsonFormat.parser.merge(offerSource, builder)
+        builder.build()
+    }
 }
-

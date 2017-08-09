@@ -1,3 +1,4 @@
+import akka.event.LoggingAdapter
 import org.apache.mesos.v1.Protos
 import org.apache.mesos.v1.Protos.CommandInfo
 import org.apache.mesos.v1.Protos.ContainerInfo
@@ -35,7 +36,7 @@ import scala.collection.JavaConversions._
 package object mesos {
     object DefaultTaskMatcher extends TaskMatcher {
         override def matchTasksToOffers(role: String, t: Iterable[TaskReqs], o: Iterable[Offer],
-            builder: TaskBuilder): Map[OfferID, Seq[TaskInfo]] = {
+            builder: TaskBuilder)(implicit logger:LoggingAdapter): Map[OfferID, Seq[TaskInfo]] = {
             //we can launch many tasks on a single offer
 
             var tasksInNeed: ListBuffer[TaskReqs] = t.to[ListBuffer]
@@ -45,11 +46,12 @@ package object mesos {
             o.map(offer => {
 
                 //TODO: manage explicit and default roles, similar to https://github.com/mesos/kafka/pull/103/files
-
-                val hasSomePorts = offer.getResourcesList.asScala
-                        .filter(res => res.getName == "ports").size > 0
+                val portsItr = offer.getResourcesList.asScala
+                        .filter(res => res.getName == "ports").iterator
+                val hasSomePorts = !portsItr.isEmpty && portsItr.next().getRanges.getRangeList.size() > 0
                 if (!hasSomePorts) {
                     //TODO: log info about skipping due to lack of ports...
+                    logger.warning("no ports!!!")
                 }
 
                 val agentId = offer.getAgentId.getValue
@@ -99,7 +101,7 @@ package object mesos {
 
     object DefaultTaskBuilder extends TaskBuilder {
 
-        def apply(reqs: TaskReqs, offer: Offer, portIndex: Int): TaskInfo = {
+        def apply(reqs: TaskReqs, offer: Offer, portIndex: Int)(implicit logger:LoggingAdapter): TaskInfo = {
             val containerPort = reqs.port
             //getting the port from the ranges is hard...
             var hostPort = 0

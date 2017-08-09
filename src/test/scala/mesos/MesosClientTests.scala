@@ -17,19 +17,42 @@
 
 package mesos
 
-import org.junit.runner.RunWith
-import org.scalatest.FlatSpec
-import org.scalatest.junit.JUnitRunner
-@RunWith(classOf[JUnitRunner])
-class MesosClientTests extends FlatSpec {
+import akka.actor.ActorSystem
+import akka.testkit.ImplicitSender
+import akka.testkit.TestKit
+import org.apache.mesos.v1.Protos.Offer
+import org.scalatest.BeforeAndAfterAll
+import org.scalatest.Matchers
+import org.scalatest.WordSpecLike
 
-    behavior of "Mesos Client"
+class MesosClientTests extends TestKit(ActorSystem("MySpec")) with ImplicitSender
+        with WordSpecLike with Matchers with BeforeAndAfterAll {
+    override def afterAll {
+        TestKit.shutdownActorSystem(system)
+    }
 
-    it should "only use a single slave per accept" in {
+    val mesosClient = system.actorOf(MesosClientActor.props("test-id", "test-name",
+            "http://bogus:5050",
+    "*"))
+
+    "An MesosClientActor actor" must {
+
+        "submit tasks to mesos after offers are received" in {
+
+//            val offers = ProtobufUtil.getOffers("/offer1.json")
+//
+//            //submit the task
+//            mesosClient ! SubmitTask(TaskReqs("taskId1", "fake-docker-image", 0.1, 256, 8080))
+//
+//            //submit offers
+//            mesosClient ! offers
+//
+//
+//            expectMsg(TaskDetails)
+        }
 
     }
-    it should "not use an offer if the number of required ports are not available" in {
 
-    }
+
 
 }

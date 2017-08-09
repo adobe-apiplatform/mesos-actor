@@ -6,6 +6,7 @@ import akka.actor.ActorLogging
 import akka.actor.ActorRef
 import akka.actor.ActorSystem
 import akka.actor.Props
+import akka.event.LoggingAdapter
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.client.RequestBuilding.Post
 import akka.http.scaladsl.model.MediaType.Compressible
@@ -87,8 +88,9 @@ class MesosClientActor(val id: String, val frameworkName: String, val master: St
     val taskBuilder: TaskBuilder)
         extends Actor with ActorLogging {
     implicit val ec: ExecutionContext = context.dispatcher
-    implicit val system: ActorSystem = context.system
-    implicit val materializer: ActorMaterializer = ActorMaterializer()(system)
+    implicit val actorSystem: ActorSystem = context.system
+    implicit val logger:LoggingAdapter = actorSystem.log
+    implicit val materializer: ActorMaterializer = ActorMaterializer()(actorSystem)
 
     private var streamId: String = null
 
@@ -147,46 +149,45 @@ class MesosClientActor(val id: String, val frameworkName: String, val master: St
         val newTaskDetails = TaskDetails(oldTaskDetails.taskInfo, event.getStatus, agentHostnames.getOrElse(newTaskDetailsAgentId, s"unknown-agent-${newTaskDetailsAgentId}"))
         taskStatuses += (event.getStatus.getTaskId.getValue -> newTaskDetails)
         pendingTaskPromises.get(event.getStatus.getTaskId.getValue) match {
-        case Some(promise) => {
-            event.getStatus.getState match {
-            case TaskState.TASK_RUNNING =>
-                log.info(s"received TASK_RUNNING update for ${event.getStatus.getTaskId.getValue} and task health is ${event.getStatus.getHealthy}")
-                if (event.getStatus.getHealthy) {
-                    promise.success(newTaskDetails)
+            case Some(promise) => {
+                event.getStatus.getState match {
+                case TaskState.TASK_RUNNING =>
+                    log.info(s"received TASK_RUNNING update for ${event.getStatus.getTaskId.getValue} and task health is ${event.getStatus.getHealthy}")
+                    if (event.getStatus.getHealthy) {
+                        promise.success(newTaskDetails)
+                        pendingTaskPromises -= event.getStatus.getTaskId.getValue
+                    }
+                case TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
+                    log.info(s"task still launching task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
+                case _ =>
+                    log.warning(s"failing task ${event.getStatus.getTaskId.getValue}  msg: ${event.getStatus.getMessage}")
+                    promise.failure(new Exception(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
                     pendingTaskPromises -= event.getStatus.getTaskId.getValue
                 }
-            case TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
-                log.info(s"task still launching task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
-            case _ =>
-                log.warning(s"failing task ${event.getStatus.getTaskId.getValue}  msg: ${event.getStatus.getMessage}")
-                promise.failure(new Exception(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
-                pendingTaskPromises -= event.getStatus.getTaskId.getValue
             }
-        }
-        case None => {
-        }
+            case None => log.debug(s"no pending promise for task ${event.getStatus.getTaskId.getValue}")
         }
         deleteTaskPromises.get(event.getStatus.getTaskId.getValue) match {
-        case Some(promise) => {
-            event.getStatus.getState match {
-            case TaskState.TASK_KILLED =>
-                promise.success(newTaskDetails)
-                deleteTaskPromises -= event.getStatus.getTaskId.getValue
-            case TaskState.TASK_RUNNING | TaskState.TASK_KILLING | TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
-                log.info(s"task still killing task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
-            case _ =>
-                deleteTaskPromises -= event.getStatus.getTaskId.getValue
-                promise.failure(new Exception(s"task ended in unexpected state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
+            case Some(promise) => {
+                event.getStatus.getState match {
+                case TaskState.TASK_KILLED =>
+                    promise.success(newTaskDetails)
+                    deleteTaskPromises -= event.getStatus.getTaskId.getValue
+                case TaskState.TASK_RUNNING | TaskState.TASK_KILLING | TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
+                    log.info(s"task still killing task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
+                case _ =>
+                    deleteTaskPromises -= event.getStatus.getTaskId.getValue
+                    promise.failure(new Exception(s"task ended in unexpected state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
+                }
             }
-        }
-        case None => {
+            case None => {
         }
         }
         //if previous state was TASK_RUNNING, but is no longer, log the details
         if (oldTaskDetails != null && oldTaskDetails.taskStatus != null) {
             if (oldTaskDetails.taskStatus.getState == TaskState.TASK_RUNNING &&
                     newTaskDetails.taskStatus.getState != TaskState.TASK_RUNNING) {
-                log.info(s"task ${oldTaskDetails.taskStatus.getTaskId.getValue} changed from TASK_RUNNING ${toCompactJsonString(newTaskDetails.taskStatus)}")
+                log.info(s"task ${oldTaskDetails.taskStatus.getTaskId.getValue} changed from TASK_RUNNING to ${toCompactJsonString(newTaskDetails.taskStatus)}")
             }
         }
 
@@ -509,6 +510,7 @@ object MesosClient {
                                         .addAllTaskInfos(tasks)))).build
 }
 
+//see https://github.com/hseeberger/akka-sse
 object EventStreamUnmarshalling extends EventStreamUnmarshalling
 
 trait EventStreamUnmarshalling {

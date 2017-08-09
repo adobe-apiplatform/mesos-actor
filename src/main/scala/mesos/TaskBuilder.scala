@@ -17,9 +17,10 @@
 
 package mesos
 
+import akka.event.LoggingAdapter
 import org.apache.mesos.v1.Protos.Offer
 import org.apache.mesos.v1.Protos.TaskInfo
 
 trait TaskBuilder {
-    def apply(reqs: TaskReqs, offer:Offer, ports:Int) : TaskInfo
+    def apply(reqs: TaskReqs, offer:Offer, ports:Int)(implicit logger:LoggingAdapter) : TaskInfo
 }
