@@ -34,7 +34,7 @@ object SampleFramework {
         val teardownTimeout = Timeout(5 seconds)
 
         //TODO: generate + store a unique id
-        val mesosClientActor = system.actorOf(MesosClientActor.props(
+        val mesosClientActor = system.actorOf(MesosClient.props(
             "sample-" + UUID.randomUUID(),
             "sample-framework",
             "http://192.168.99.100:5050",

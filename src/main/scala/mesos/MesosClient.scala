@@ -1,61 +1,32 @@
 package mesos
 
-import akka.NotUsed
 import akka.actor.Actor
 import akka.actor.ActorLogging
-import akka.actor.ActorRef
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.event.LoggingAdapter
-import akka.http.scaladsl.Http
-import akka.http.scaladsl.client.RequestBuilding.Post
-import akka.http.scaladsl.model.MediaType.Compressible
-import akka.http.scaladsl.model.headers.RawHeader
-import akka.http.scaladsl.model.ContentType
-import akka.http.scaladsl.model.HttpEntity
-import akka.http.scaladsl.model.HttpRequest
-import akka.http.scaladsl.model.HttpResponse
-import akka.http.scaladsl.model.MediaType
-import akka.http.scaladsl.unmarshalling.FromEntityUnmarshaller
-import akka.http.scaladsl.unmarshalling.Unmarshal
-import akka.http.scaladsl.unmarshalling.Unmarshaller
 import akka.pattern.pipe
-import akka.stream.alpakka.recordio.scaladsl.RecordIOFraming
-import akka.stream.scaladsl.Flow
-import akka.stream.scaladsl.Sink
-import akka.stream.scaladsl.Source
-import akka.stream.stage.GraphStage
-import akka.stream.stage.GraphStageLogic
-import akka.stream.stage.InHandler
-import akka.stream.stage.OutHandler
-import akka.stream.ActorMaterializer
-import akka.stream.Attributes
-import akka.stream.FlowShape
-import akka.stream.Inlet
-import akka.stream.Outlet
-import akka.util.ByteString
 import java.net.URI
-import java.util.Optional
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.ExecutorID
 import org.apache.mesos.v1.Protos.FrameworkID
-import org.apache.mesos.v1.Protos.FrameworkInfo
 import org.apache.mesos.v1.Protos.Offer
 import org.apache.mesos.v1.Protos.OfferID
 import org.apache.mesos.v1.Protos.TaskID
 import org.apache.mesos.v1.Protos.TaskInfo
 import org.apache.mesos.v1.Protos.TaskState
 import org.apache.mesos.v1.Protos.TaskStatus
-import org.apache.mesos.v1.scheduler.Protos.Call._
-import org.apache.mesos.v1.scheduler.Protos.Event._
 import org.apache.mesos.v1.scheduler.Protos.Call
+import org.apache.mesos.v1.scheduler.Protos.Call._
 import org.apache.mesos.v1.scheduler.Protos.Event
+import org.apache.mesos.v1.scheduler.Protos.Event._
 import scala.collection.JavaConversions._
 import scala.collection.JavaConverters._
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
 
+import scala.collection.mutable
 /**
  * Created by tnorris on 6/4/17.
  */
@@ -84,25 +55,31 @@ case class TaskReqs(taskId: String, dockerImage: String, cpus: Double, mem: Int,
 case class TaskDetails(taskInfo: TaskInfo, taskStatus: TaskStatus = null, hostname: String = null)
 
 //TODO: mesos authentication
-class MesosClientActor(val id: String, val frameworkName: String, val master: String, val role: String, val taskMatcher: TaskMatcher,
-    val taskBuilder: TaskBuilder)
-        extends Actor with ActorLogging {
+trait MesosClientActor
+        extends Actor with ActorLogging with MesosClientConnection {
     implicit val ec: ExecutionContext = context.dispatcher
+    implicit val logger: LoggingAdapter = context.system.log
     implicit val actorSystem: ActorSystem = context.system
-    implicit val logger:LoggingAdapter = actorSystem.log
-    implicit val materializer: ActorMaterializer = ActorMaterializer()(actorSystem)
 
-    private var streamId: String = null
 
-    private val frameworkID = FrameworkID.newBuilder().setValue(id).build();
-    private val cpusPerTask = 0.1
+    val id: String
+    val frameworkName: String
+    val master: String
+    val role: String
+    val taskMatcher: TaskMatcher
+    val taskBuilder: TaskBuilder
+
+    private lazy val frameworkID = FrameworkID.newBuilder().setValue(id).build();
+
     //TODO: handle redirect to master see https://github.com/mesosphere/mesos-rxjava/blob/d6fd040af3322552012fb3dcf61debb9886adbf3/mesos-rxjava-client/src/main/java/com/mesosphere/mesos/rx/java/MesosClient.java#L167
-    private val mesosUri = URI.create(s"${master}/api/v1/scheduler")
-    private var pendingTaskInfo: Map[String, TaskReqs] = Map()
-    private var pendingTaskPromises: Map[String, Promise[TaskDetails]] = Map()
-    private var deleteTaskPromises: Map[String, Promise[TaskDetails]] = Map()
-    private var taskStatuses: Map[String, TaskDetails] = Map()
-    private var agentHostnames: Map[String, String] = Map()
+    val mesosUri = URI.create(s"${master}/api/v1/scheduler")
+    var streamId: String = null
+
+    private val pendingTaskInfo: mutable.Map[String, TaskReqs] = mutable.Map()
+    private val pendingTaskPromises: mutable.Map[String, Promise[TaskDetails]] = mutable.Map()
+    private val deleteTaskPromises: mutable.Map[String, Promise[TaskDetails]] = mutable.Map()
+    private val taskStatuses: mutable.Map[String, TaskDetails] = mutable.Map()
+    private val agentHostnames: mutable.Map[String, String] = mutable.Map()
 
     //TODO: FSM for handling subscribing, subscribed, failed, etc states
     override def receive: Receive = {
@@ -217,10 +194,6 @@ class MesosClientActor(val id: String, val frameworkName: String, val master: St
         }
     }
 
-    import com.google.protobuf.util.JsonFormat
-
-    private def toCompactJsonString(message: com.google.protobuf.Message) =
-        JsonFormat.printer.omittingInsignificantWhitespace.print(message)
 
     def handleOffers(event: Offers) = {
 
@@ -313,20 +286,8 @@ class MesosClientActor(val id: String, val frameworkName: String, val master: St
         log.info(s"subscribed; frameworkId is ${event.getFrameworkId}")
     }
 
-    val connectionFlow: Flow[HttpRequest, HttpResponse, Future[Http.OutgoingConnection]] = {
-        Http().outgoingConnection(host = mesosUri.getHost, port = mesosUri.getPort)
-    }
 
-    def exec(call: Call): Future[HttpResponse] = {
-        val req = Post("/api/v1/scheduler")
-                .withHeaders(
-                    RawHeader("Mesos-Stream-Id", streamId))
-                .withEntity(MesosClient.protobufContentType, call.toByteArray)
 
-        Source.single(req)
-                .via(connectionFlow)
-                .runWith(Sink.head)
-    }
 
     def teardown(): Future[TeardownComplete.type] = {
         log.info("submitting teardown message...")
@@ -416,86 +377,21 @@ class MesosClientActor(val id: String, val frameworkName: String, val master: St
         exec(reconcileCall)
     }
 
-    def subscribe(mesosClientActor: ActorRef, frameworkID: FrameworkID, frameworkName: String): Future[SubscribeComplete] = {
 
-        import EventStreamUnmarshalling._
-
-        val result = Promise[SubscribeComplete]
-
-        val subscribeCall = Call.newBuilder()
-                .setType(Call.Type.SUBSCRIBE)
-                .setFrameworkId(frameworkID)
-                .setSubscribe(Call.Subscribe.newBuilder
-                        .setFrameworkInfo(FrameworkInfo.newBuilder
-                                .setId(frameworkID)
-                                .setUser(Optional.ofNullable(System.getenv("user")).orElse("root")) // https://issues.apache.org/jira/browse/MESOS-3747
-                                .setName(frameworkName)
-                                .setFailoverTimeout(0)
-                                //.setRole(role)
-                                .build)
-                        .build())
-                .build()
-
-        //TODO: handle connection failures: http://doc.akka.io/docs/akka-http/10.0.5/scala/http/low-level-server-side-api.html
-        //see https://gist.github.com/ktoso/4dda7752bf6f4393d1ac
-        //see https://tech.zalando.com/blog/about-akka-streams/?gh_src=4n3gxh1
-        Http()
-                .singleRequest(Post(s"${mesosUri}/subscribe")
-                        .withHeaders(RawHeader("Accept", "application/x-protobuf"),
-                            RawHeader("Connection", "close"))
-                        .withEntity(MesosClient.protobufContentType, subscribeCall.toByteArray))
-                .flatMap(response => {
-                    if (response.status.isSuccess()) {
-                        log.debug(s"response: ${response} ")
-                        val newStreamId = response.getHeader("Mesos-Stream-Id").get().value()
-                        if (streamId == null) {
-                            log.info(s"setting new streamId ${newStreamId}")
-                            streamId = newStreamId
-                            result.success(SubscribeComplete())
-                        } else if (streamId != newStreamId) {
-                            //TODO: do we need to handle StreamId changes?
-                            log.warning(s"streamId has changed! ${streamId}  ${newStreamId}")
-                        }
-                        Unmarshal(response).to[Source[Event, NotUsed]]
-                    } else {
-                        //TODO: reconnect?
-                        throw new Exception(s"subscribe response failed: ${response}")
-                    }
-                })
-
-                .foreach(eventSource => {
-                    eventSource.runForeach(event => {
-                        handleEvent(event)
-                    })
-                })
-
-        def handleEvent(event: Event)(implicit ec: ExecutionContext) = {
-            event.getType match {
-            case Event.Type.OFFERS => mesosClientActor ! event.getOffers
-            case Event.Type.HEARTBEAT => mesosClientActor ! event
-            case Event.Type.SUBSCRIBED => mesosClientActor ! event.getSubscribed
-            case Event.Type.UPDATE => mesosClientActor ! event.getUpdate
-            case eventType => log.warning(s"unhandled event ${toCompactJsonString(event)}")
-                //todo: handle other event types
-            }
-        }
-
-        result.future
-    }
 
 }
+class MesosClient(val id: String, val frameworkName: String, val master: String, val role: String,
+    val taskMatcher: TaskMatcher,
+    val taskBuilder: TaskBuilder) extends MesosClientActor with MesosClientHttpConnection {
 
-object MesosClientActor {
-    def props(id: String, name: String, master: String, role: String,
-        taskMatcher: TaskMatcher = DefaultTaskMatcher,
-        taskBuilder: TaskBuilder = DefaultTaskBuilder): Props =
-        Props(new MesosClientActor(id, name, master, role, taskMatcher, taskBuilder))
 }
 
 object MesosClient {
 
-    val protobufContentType = ContentType(MediaType.applicationBinary("x-protobuf", Compressible, "proto"))
-
+    def props(id: String, frameworkName: String, master: String, role: String,
+        taskMatcher: TaskMatcher = DefaultTaskMatcher,
+        taskBuilder: TaskBuilder = DefaultTaskBuilder): Props =
+        Props(new MesosClient(id, frameworkName, master, role, taskMatcher, taskBuilder) )
     //TODO: allow task persistence/reconcile
 
     def accept(frameworkId: FrameworkID, offerIds: java.lang.Iterable[OfferID], tasks: java.lang.Iterable[TaskInfo]): Call =
@@ -510,44 +406,3 @@ object MesosClient {
                                         .addAllTaskInfos(tasks)))).build
 }
 
-//see https://github.com/hseeberger/akka-sse
-object EventStreamUnmarshalling extends EventStreamUnmarshalling
-
-trait EventStreamUnmarshalling {
-
-    implicit final val fromEventStream: FromEntityUnmarshaller[Source[Event, NotUsed]] = {
-        val eventParser = new ServerSentEventParser()
-
-        def unmarshal(entity: HttpEntity) =
-
-            entity.withoutSizeLimit.dataBytes
-                    .via(RecordIOFraming.scanner())
-                    .via(eventParser)
-                    .mapMaterializedValue(_ => NotUsed: NotUsed)
-
-        Unmarshaller.strict(unmarshal).forContentTypes(MesosClient.protobufContentType)
-    }
-}
-
-private final class ServerSentEventParser() extends GraphStage[FlowShape[ByteString, Event]] {
-
-    override val shape =
-        FlowShape(Inlet[ByteString]("ServerSentEventParser.in"), Outlet[Event]("ServerSentEventParser.out"))
-
-    override def createLogic(attributes: Attributes) =
-        new GraphStageLogic(shape) with InHandler with OutHandler {
-
-            import shape._
-
-            setHandlers(in, out, this)
-
-            override def onPush() = {
-                val line: ByteString = grab(in)
-                //unmarshall proto
-                val event = Event.parseFrom(line.toArray)
-                push(out, event)
-            }
-
-            override def onPull() = pull(in)
-        }
-}
