@@ -5,6 +5,7 @@ import akka.actor.ActorLogging
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.event.LoggingAdapter
+import akka.http.scaladsl.model.HttpResponse
 import akka.pattern.pipe
 import java.net.URI
 import org.apache.mesos.v1.Protos.AgentID
@@ -25,8 +26,10 @@ import scala.collection.JavaConverters._
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
-
 import scala.collection.mutable
+import scala.util.Failure
+import scala.util.Success
+
 /**
  * Created by tnorris on 6/4/17.
  */
@@ -60,7 +63,6 @@ trait MesosClientActor
     implicit val ec: ExecutionContext = context.dispatcher
     implicit val logger: LoggingAdapter = context.system.log
     implicit val actorSystem: ActorSystem = context.system
-
 
     val id: String
     val frameworkName: String
@@ -126,38 +128,38 @@ trait MesosClientActor
         val newTaskDetails = TaskDetails(oldTaskDetails.taskInfo, event.getStatus, agentHostnames.getOrElse(newTaskDetailsAgentId, s"unknown-agent-${newTaskDetailsAgentId}"))
         taskStatuses += (event.getStatus.getTaskId.getValue -> newTaskDetails)
         pendingTaskPromises.get(event.getStatus.getTaskId.getValue) match {
-            case Some(promise) => {
-                event.getStatus.getState match {
-                case TaskState.TASK_RUNNING =>
-                    log.info(s"received TASK_RUNNING update for ${event.getStatus.getTaskId.getValue} and task health is ${event.getStatus.getHealthy}")
-                    if (event.getStatus.getHealthy) {
-                        promise.success(newTaskDetails)
-                        pendingTaskPromises -= event.getStatus.getTaskId.getValue
-                    }
-                case TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
-                    log.info(s"task still launching task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
-                case _ =>
-                    log.warning(s"failing task ${event.getStatus.getTaskId.getValue}  msg: ${event.getStatus.getMessage}")
-                    promise.failure(new Exception(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
+        case Some(promise) => {
+            event.getStatus.getState match {
+            case TaskState.TASK_RUNNING =>
+                log.info(s"received TASK_RUNNING update for ${event.getStatus.getTaskId.getValue} and task health is ${event.getStatus.getHealthy}")
+                if (event.getStatus.getHealthy) {
+                    promise.success(newTaskDetails)
                     pendingTaskPromises -= event.getStatus.getTaskId.getValue
                 }
+            case TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
+                log.info(s"task still launching task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
+            case _ =>
+                log.warning(s"failing task ${event.getStatus.getTaskId.getValue}  msg: ${event.getStatus.getMessage}")
+                promise.failure(new Exception(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
+                pendingTaskPromises -= event.getStatus.getTaskId.getValue
             }
-            case None => log.debug(s"no pending promise for task ${event.getStatus.getTaskId.getValue}")
+        }
+        case None => log.debug(s"no pending promise for task ${event.getStatus.getTaskId.getValue}")
         }
         deleteTaskPromises.get(event.getStatus.getTaskId.getValue) match {
-            case Some(promise) => {
-                event.getStatus.getState match {
-                case TaskState.TASK_KILLED =>
-                    promise.success(newTaskDetails)
-                    deleteTaskPromises -= event.getStatus.getTaskId.getValue
-                case TaskState.TASK_RUNNING | TaskState.TASK_KILLING | TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
-                    log.info(s"task still killing task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
-                case _ =>
-                    deleteTaskPromises -= event.getStatus.getTaskId.getValue
-                    promise.failure(new Exception(s"task ended in unexpected state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
-                }
+        case Some(promise) => {
+            event.getStatus.getState match {
+            case TaskState.TASK_KILLED =>
+                promise.success(newTaskDetails)
+                deleteTaskPromises -= event.getStatus.getTaskId.getValue
+            case TaskState.TASK_RUNNING | TaskState.TASK_KILLING | TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
+                log.info(s"task still killing task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
+            case _ =>
+                deleteTaskPromises -= event.getStatus.getTaskId.getValue
+                promise.failure(new Exception(s"task ended in unexpected state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
             }
-            case None => {
+        }
+        case None => {
         }
         }
         //if previous state was TASK_RUNNING, but is no longer, log the details
@@ -183,17 +185,10 @@ trait MesosClientActor
                             .setUuid(status.getUuid)
                             .build())
                     .build()
-            exec(ack).map(resp => {
-                if (resp.status.isSuccess()) {
-                    log.info(s"ack succeeded")
-                } else {
-                    log.warning(s"ack failed! ${resp}")
-                }
-            })
+            execInternal(ack)
 
         }
     }
-
 
     def handleOffers(event: Offers) = {
 
@@ -238,34 +233,22 @@ trait MesosClientActor
                             .addAllOfferIds(seqAsJavaList(offerIds)))
                     .build;
 
-            exec(declineCall)
-                    .map(resp => {
-                        if (resp.status.isSuccess()) {
-                            log.info(s"decline succeeded")
-                        } else {
-                            log.warning("failed!")
-                        }
-                    })
+            execInternal(declineCall)
+
         } else {
             val acceptCall = MesosClient.accept(frameworkID,
                 matchedTasks.keys.asJava,
                 matchedTasks.values.flatten.asJava)
 
-            exec(acceptCall)
-                    .map(resp => {
-                        if (resp.status.isSuccess()) {
-                            log.info(s"accept succeeded")
-                        } else {
-                            log.warning(s"accept failed! ${resp}")
-                        }
+            execInternal(acceptCall).onComplete {
+                case Success(r) =>
+                    log.info("success")
+                    matchedTasks.values.flatten.map(task => {
+                        pendingTaskInfo -= task.getTaskId.getValue
+                        taskStatuses += (task.getTaskId.getValue -> TaskDetails(task))
                     })
-            //todo: verify success
-
-            matchedTasks.values.flatten.map(task => {
-                pendingTaskInfo -= task.getTaskId.getValue
-                taskStatuses += (task.getTaskId.getValue -> TaskDetails(task))
-            })
-
+                case Failure(_) => log.info("failure")
+            }
         }
 
         if (!pendingTaskInfo.isEmpty) {
@@ -286,9 +269,6 @@ trait MesosClientActor
         log.info(s"subscribed; frameworkId is ${event.getFrameworkId}")
     }
 
-
-
-
     def teardown(): Future[TeardownComplete.type] = {
         log.info("submitting teardown message...")
         val teardownCall = Call.newBuilder
@@ -297,15 +277,10 @@ trait MesosClientActor
                 .build;
 
         //todo: wait for teardown...
-        exec(teardownCall)
-                .map(resp => {
-                    if (resp.status.isSuccess()) {
-                        log.info(s"teardown succeeded")
-                    } else {
-                        log.error(s"teardown failed! ${resp}")
-                    }
-                    TeardownComplete
-                })
+        execInternal(teardownCall)
+            .map(resp => {
+                TeardownComplete
+            })
     }
 
     def revive(): Unit = {
@@ -314,14 +289,7 @@ trait MesosClientActor
                 .setFrameworkId(frameworkID)
                 .setType(Call.Type.REVIVE)
                 .build()
-        exec(reviveCall)
-                .map(resp => {
-                    if (resp.status.isSuccess()) {
-                        log.info(s"revive succeeded")
-                    } else {
-                        log.error(s"revive failed! ${resp}")
-                    }
-                })
+        execInternal(reviveCall)
     }
 
     def kill(taskID: TaskID, agentID: AgentID): Unit = {
@@ -333,14 +301,7 @@ trait MesosClientActor
                         .setAgentId(agentID)
                         .build())
                 .build()
-        exec(killCall)
-                .map(resp => {
-                    if (resp.status.isSuccess()) {
-                        log.info(s"kill succeeded")
-                    } else {
-                        log.error(s"kill failed! ${resp}")
-                    }
-                })
+        execInternal(killCall)
     }
 
     def shutdown(executorID: ExecutorID, agentID: AgentID): Unit = {
@@ -352,7 +313,7 @@ trait MesosClientActor
                         .setAgentId(agentID)
                         .build()
                 ).build()
-        exec(shutdownCall)
+        execInternal(shutdownCall)
     }
 
     //TODO: implement
@@ -374,12 +335,22 @@ trait MesosClientActor
                 .setType(Call.Type.RECONCILE)
                 .setReconcile(reconcile)
                 .build()
-        exec(reconcileCall)
+        execInternal(reconcileCall)
     }
 
-
-
+    private def execInternal(call: Call): Future[HttpResponse] = {
+        exec(call).flatMap(resp => {
+            if (!resp.status.isSuccess()){
+                //log and fail the future if response was not "successful"
+                log.error(s"http request of type ${call.getType} returned non-successful status ${resp}")
+                Future.failed(new Exception("not successful"))
+            } else {
+                Future.successful(resp)
+            }
+        })
+    }
 }
+
 class MesosClient(val id: String, val frameworkName: String, val master: String, val role: String,
     val taskMatcher: TaskMatcher,
     val taskBuilder: TaskBuilder) extends MesosClientActor with MesosClientHttpConnection {
@@ -391,7 +362,8 @@ object MesosClient {
     def props(id: String, frameworkName: String, master: String, role: String,
         taskMatcher: TaskMatcher = DefaultTaskMatcher,
         taskBuilder: TaskBuilder = DefaultTaskBuilder): Props =
-        Props(new MesosClient(id, frameworkName, master, role, taskMatcher, taskBuilder) )
+        Props(new MesosClient(id, frameworkName, master, role, taskMatcher, taskBuilder))
+
     //TODO: allow task persistence/reconcile
 
     def accept(frameworkId: FrameworkID, offerIds: java.lang.Iterable[OfferID], tasks: java.lang.Iterable[TaskInfo]): Call =
