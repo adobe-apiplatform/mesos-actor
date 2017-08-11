@@ -19,8 +19,6 @@ package mesos
 
 import akka.actor.ActorSystem
 import akka.event.LoggingAdapter
-import org.apache.mesos.v1.Protos.Offer
-import org.apache.mesos.v1.scheduler.Protos.Event.Offers
 import org.junit.runner.RunWith
 import org.scalatest.FlatSpec
 import org.scalatest.Matchers

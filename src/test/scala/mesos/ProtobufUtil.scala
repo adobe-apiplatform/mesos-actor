@@ -17,6 +17,7 @@
 
 package mesos
 
+import org.apache.mesos.v1.Protos.TaskInfo
 import org.apache.mesos.v1.scheduler.Protos.Event.Offers
 
 object ProtobufUtil {
@@ -25,6 +26,14 @@ object ProtobufUtil {
         val offerSource = scala.io.Source.fromInputStream(getClass.getResourceAsStream(jsonFile)).mkString
         import com.google.protobuf.util.JsonFormat
         val builder = Offers.newBuilder()
+        JsonFormat.parser.merge(offerSource, builder)
+        builder.build()
+    }
+
+    def getTaskInfo(jsonFile:String):TaskInfo = {
+        val offerSource = scala.io.Source.fromInputStream(getClass.getResourceAsStream(jsonFile)).mkString
+        import com.google.protobuf.util.JsonFormat
+        val builder = TaskInfo.newBuilder()
         JsonFormat.parser.merge(offerSource, builder)
         builder.build()
     }

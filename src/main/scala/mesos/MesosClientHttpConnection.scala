@@ -59,7 +59,7 @@ import scala.concurrent.Future
 import scala.concurrent.Promise
 
 trait MesosClientHttpConnection extends MesosClientConnection {
-    self: MesosClientActor =>
+    this: MesosClientActor =>
     implicit val materializer:ActorMaterializer = ActorMaterializer()
 
     val connectionFlow: Flow[HttpRequest, HttpResponse, Future[Http.OutgoingConnection]] = {
@@ -67,6 +67,7 @@ trait MesosClientHttpConnection extends MesosClientConnection {
     }
 
     def exec(call: Call): Future[HttpResponse] = {
+        log.info(s"sending ${call.getType}")
         val req = Post("/api/v1/scheduler")
                 .withHeaders(
                     RawHeader("Mesos-Stream-Id", streamId))
@@ -77,7 +78,7 @@ trait MesosClientHttpConnection extends MesosClientConnection {
                 .runWith(Sink.head)
     }
 
-    def subscribe(mesosClientActor: ActorRef, frameworkID: FrameworkID, frameworkName: String): Future[SubscribeComplete] = {
+    def subscribe(frameworkID: FrameworkID, frameworkName: String): Future[SubscribeComplete] = {
 
         import EventStreamUnmarshalling._
 
@@ -96,7 +97,7 @@ trait MesosClientHttpConnection extends MesosClientConnection {
                                 .build)
                         .build())
                 .build()
-        logger.info(s"subscribing to ${mesosUri}")
+        logger.info(s"sending SUBSCRIBE to ${mesosUri}")
         //TODO: handle connection failures: http://doc.akka.io/docs/akka-http/10.0.5/scala/http/low-level-server-side-api.html
         //see https://gist.github.com/ktoso/4dda7752bf6f4393d1ac
         //see https://tech.zalando.com/blog/about-akka-streams/?gh_src=4n3gxh1
@@ -130,21 +131,10 @@ trait MesosClientHttpConnection extends MesosClientConnection {
                     })
                 })
 
-        def handleEvent(event: Event)(implicit ec: ExecutionContext) = {
-            event.getType match {
-            case Event.Type.OFFERS => mesosClientActor ! event.getOffers
-            case Event.Type.HEARTBEAT => mesosClientActor ! event
-            case Event.Type.SUBSCRIBED => mesosClientActor ! event.getSubscribed
-            case Event.Type.UPDATE => mesosClientActor ! event.getUpdate
-            case eventType => logger.warning(s"unhandled event ${toCompactJsonString(event)}")
-                //todo: handle other event types
-            }
-        }
+
 
         result.future
     }
-
-
 }
 
 //see https://github.com/hseeberger/akka-sse

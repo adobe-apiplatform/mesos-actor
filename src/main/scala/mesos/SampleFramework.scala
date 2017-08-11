@@ -60,7 +60,7 @@ object SampleFramework {
             log.info(s"launched task id ${taskDetails.taskInfo.getTaskId.getValue} with state ${taskDetails.taskStatus.getState} on host:port ${taskHost}:${taskPort}")
 
             //schedule delete in 40 seconds
-            system.scheduler.scheduleOnce(40.seconds) {
+            system.scheduler.scheduleOnce(10.seconds) {
                 log.info(s"removing previously created task ${taskId}")
                 mesosClientActor.ask(DeleteTask(taskId))(taskDeleteTimeout).mapTo[TaskStatus].map(taskStatus => {
                     log.info(s"task killed ended with state ${taskStatus.getState}")

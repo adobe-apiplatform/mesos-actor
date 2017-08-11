@@ -17,7 +17,6 @@
 
 package mesos
 
-import akka.actor.ActorRef
 import akka.http.scaladsl.model.HttpResponse
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.scheduler.Protos.Call
@@ -25,5 +24,5 @@ import scala.concurrent.Future
 
 trait MesosClientConnection {
     def exec(call: Call): Future[HttpResponse]
-    def subscribe(mesosClientActor: ActorRef, frameworkID: FrameworkID, frameworkName: String): Future[SubscribeComplete]
+    def subscribe(frameworkID: FrameworkID, frameworkName: String): Future[SubscribeComplete]
 }

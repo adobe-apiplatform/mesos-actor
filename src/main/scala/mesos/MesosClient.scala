@@ -23,6 +23,7 @@ import org.apache.mesos.v1.scheduler.Protos.Event
 import org.apache.mesos.v1.scheduler.Protos.Event._
 import scala.collection.JavaConversions._
 import scala.collection.JavaConverters._
+import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
@@ -82,13 +83,13 @@ trait MesosClientActor
     //TODO: handle redirect to master see https://github.com/mesosphere/mesos-rxjava/blob/d6fd040af3322552012fb3dcf61debb9886adbf3/mesos-rxjava-client/src/main/java/com/mesosphere/mesos/rx/java/MesosClient.java#L167
     val mesosUri = URI.create(s"${master}/api/v1/scheduler")
     var streamId: String = null
-    private val tasks: mutable.Map[String, TaskState] = mutable.Map()
+    private val tasks: TrieMap[String, TaskState] = TrieMap()
 
     //TODO: FSM for handling subscribing, subscribed, failed, etc states
     override def receive: Receive = {
         //control messages
         case Subscribe => {
-            subscribe(self, frameworkID, frameworkName).pipeTo(sender())
+            subscribe(frameworkID, frameworkName).pipeTo(sender())
         }
         case SubmitTask(task) => {
             val taskPromise = Promise[Running]()
@@ -168,7 +169,9 @@ trait MesosClientActor
                 }
             }
 
-            case _ => log.warning(s"unexpected task status for update event ${event}")
+            case _ =>
+                log.warning(s"unexpected task status ${oldTaskDetails} for update event ${event}")
+                tasks.foreach(t => log.info(s"      ${t}"))
 
         }
 
@@ -233,28 +236,29 @@ trait MesosClientActor
 
             execInternal(acceptCall).onComplete {
                 case Success(r) =>
-                    log.info("success")
                     matchedTasks.values.flatten.map(task => {
                         tasks(task.getTaskId.getValue) match {
                             case SubmitPending(_,promise) =>
                                 //dig the hostname out of the offer whose agent id matches the agent id in the task info
                                 val hostname = event.getOffersList.asScala.find(p => p.getAgentId == task.getAgentId).get.getHostname
+                                log.info(s"updating task ${task.getTaskId.getValue} to Submitted")
                                 tasks.update(task.getTaskId.getValue, Submitted(task, hostname, promise))
+                                log.info(s"done updating task ${task.getTaskId.getValue}")
                             case previousState => log.warning(s"submitted a task that was not in SubmitPending? ${previousState}")
                         }
 
                     })
+                    if (!pending.isEmpty) {
+                        log.warning("still have pending tasks after OFFER + ACCEPT: ")
+                        pending.foreach(t => log.info(s"     -> ${t.taskId}"))
+                    }
                 case Failure(_) => log.info("failure")
             }
         }
 
-        if (!pending.isEmpty) {
-            log.warning("still have pending tasks! (may be oversubscribed)")
-        }
-
     }
 
-    def pending = tasks.collect{ case (_, submitPending: SubmitPending) => submitPending.reqs}
+    def pending() = tasks.collect{ case (_, submitPending: SubmitPending) => submitPending.reqs}
     def handleHeartbeat(event: Event) = {
         //TODO: monitor heartbeat
         log.info(s"received heartbeat...")
@@ -346,6 +350,19 @@ trait MesosClientActor
                 Future.successful(resp)
             }
         })
+    }
+
+    def handleEvent(event: Event)(implicit ec: ExecutionContext):Unit = {
+        log.info(s"receiving ${event.getType}")
+
+        event.getType match {
+        case Event.Type.OFFERS => self ! event.getOffers
+        case Event.Type.HEARTBEAT => self ! event
+        case Event.Type.SUBSCRIBED => self ! event.getSubscribed
+        case Event.Type.UPDATE => self ! event.getUpdate
+        case eventType => logger.warning(s"unhandled event ${toCompactJsonString(event)}")
+            //todo: handle other event types
+        }
     }
 }
 

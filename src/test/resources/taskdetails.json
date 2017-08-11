@@ -1,0 +1,63 @@
+{
+  "name": "taskId1",
+  "taskId": {
+    "value": "taskId1"
+  },
+  "agentId": {
+    "value": "db6b062d-84e3-4a2e-a8c5-98ffa944a304-S0"
+  },
+  "resources": [{
+    "name": "ports",
+    "type": "RANGES",
+    "ranges": {
+      "range": [{
+        "begin": "11001",
+        "end": "11001"
+      }]
+    }
+  }, {
+    "name": "cpus",
+    "type": "SCALAR",
+    "scalar": {
+      "value": 0.1
+    },
+    "role": "*"
+  }, {
+    "name": "mem",
+    "type": "SCALAR",
+    "scalar": {
+      "value": 256.0
+    },
+    "role": "*"
+  }],
+  "command": {
+    "environment": {
+      "variables": [{
+        "name": "__OW_API_HOST",
+        "value": "192.168.99.100"
+      }]
+    },
+    "shell": false
+  },
+  "healthCheck": {
+    "delaySeconds": 0.0,
+    "intervalSeconds": 1.0,
+    "timeoutSeconds": 1.0,
+    "gracePeriodSeconds": 25.0,
+    "type": "TCP",
+    "tcp": {
+      "port": 8080
+    }
+  },
+  "container": {
+    "type": "DOCKER",
+    "docker": {
+      "image": "fake-docker-image",
+      "network": "BRIDGE",
+      "portMappings": [{
+        "hostPort": 11001,
+        "containerPort": 8080
+      }]
+    }
+  }
+}
