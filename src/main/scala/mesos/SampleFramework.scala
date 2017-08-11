@@ -51,13 +51,13 @@ object SampleFramework {
 
         val task = TaskReqs(taskId, "trinitronx/python-simplehttpserver", 0.1, 24, 8080)
 
-        val launched: Future[TaskDetails] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskDetails]
+        val launched: Future[Running] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[Running]
 
         launched map { taskDetails =>
             //      val taskHost = taskDetails.taskStatus.getContainerStatus.getNetworkInfos(0).getIpAddresses(0)
             val taskHost = taskDetails.hostname
             val taskPort = taskDetails.taskInfo.getResourcesList.asScala.filter(_.getName == "ports").iterator.next().getRanges.getRange(0).getBegin.toInt
-            log.info(s"launched task with state ${taskDetails.taskStatus.getState} on host:port ${taskHost}:${taskPort}")
+            log.info(s"launched task id ${taskDetails.taskInfo.getTaskId.getValue} with state ${taskDetails.taskStatus.getState} on host:port ${taskHost}:${taskPort}")
 
             //schedule delete in 40 seconds
             system.scheduler.scheduleOnce(40.seconds) {
