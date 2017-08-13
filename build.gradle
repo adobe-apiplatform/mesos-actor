@@ -9,7 +9,9 @@ ext {
     akkaVersion = "2.5.1"
     akkaHttpVersion = "10.0.6"
 }
-
+plugins {
+    id "com.jfrog.bintray" version "1.7.3"
+}
 dependencies {
     compile "org.scala-lang:scala-library:${gradle.scala.version}"
     //akka
@@ -35,3 +37,12 @@ dependencies {
 
 }
 
+bintray {
+    pkg {
+        repo = 'maven'
+        name = 'mesos-actor'
+        userOrg = 'adobe-apiplatform'
+        licenses = ['Apache-2.0']
+        vcsUrl = 'https://github.com/adobe-apiplatform/mesos-actor.git'
+    }
+}
