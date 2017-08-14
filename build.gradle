@@ -43,18 +43,25 @@ dependencies {
 }
 
 bintray {
+    user = property('user')
+    key = property('key')
     configurations = ['archives']
     pkg {
         repo = 'maven'
         name = 'mesos-actor'
+        desc = 'An Akka based Mesos actor for creating Mesos frameworks.'
         userOrg = 'adobe-apiplatform'
         licenses = ['Apache-2.0']
         vcsUrl = 'https://github.com/adobe-apiplatform/mesos-actor.git'
-    }
-    version {
-        name = '0.0.1'
-        desc = 'Mesos Actor 0.0.1'
-        released  = new Date()
-        vcsTag = '0.0.1'
+        issueTrackerUrl = 'https://github.com/adobe-apiplatform/mesos-actor/issues'
+        websiteUrl = 'https://github.com/adobe-apiplatform/mesos-actor'
+        githubRepo = 'adobe-apiplatform/mesos-actor' //Optional Github repository
+        githubReleaseNotesFile = 'Readme.md' //Optional Github readme file
+        version {
+            name = '0.0.1'
+            desc = 'Mesos Actor 0.0.1'
+            released  = new Date()
+            vcsTag = '0.0.1'
+        }
     }
 }
