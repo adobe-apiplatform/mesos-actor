@@ -89,8 +89,8 @@ To use in your own application:
 * init the client:
 ```scala
     val mesosClientActor = system.actorOf(MesosClientActor.props(
-      "whisk-invoker-"+UUID.randomUUID(),
-      "whisk-framework",
+      "sample-framework-"+UUID.randomUUID(),
+      "sample-framework",
       "http://192.168.99.100:5050",
       "*",
       taskBuilder = buildTask

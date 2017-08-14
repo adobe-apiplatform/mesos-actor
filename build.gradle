@@ -1,5 +1,13 @@
+
+plugins {
+    id "com.jfrog.bintray" version "1.7.3"
+}
+
+
 apply plugin: 'scala'
 apply plugin: 'idea'
+
+
 repositories {
     mavenCentral()
 }
@@ -8,9 +16,6 @@ ext {
     scalaVersion = "2.11"
     akkaVersion = "2.5.1"
     akkaHttpVersion = "10.0.6"
-}
-plugins {
-    id "com.jfrog.bintray" version "1.7.3"
 }
 dependencies {
     compile "org.scala-lang:scala-library:${gradle.scala.version}"
@@ -38,11 +43,18 @@ dependencies {
 }
 
 bintray {
+    configurations = ['archives']
     pkg {
         repo = 'maven'
         name = 'mesos-actor'
         userOrg = 'adobe-apiplatform'
         licenses = ['Apache-2.0']
         vcsUrl = 'https://github.com/adobe-apiplatform/mesos-actor.git'
+    }
+    version {
+        name = '0.0.1'
+        desc = 'Mesos Actor 0.0.1'
+        released  = new Date()
+        vcsTag = '0.0.1'
     }
 }
