@@ -29,7 +29,7 @@ import org.apache.mesos.v1.Protos.Offer
 import org.apache.mesos.v1.Protos.OfferID
 import org.apache.mesos.v1.Protos.TaskID
 import org.apache.mesos.v1.Protos.TaskInfo
-import org.apache.mesos.v1.Protos.TaskState
+import org.apache.mesos.v1.Protos.{ TaskState => MesosTaskState }
 import org.apache.mesos.v1.Protos.TaskStatus
 import org.apache.mesos.v1.scheduler.Protos.Call
 import org.apache.mesos.v1.scheduler.Protos.Call._
@@ -41,7 +41,6 @@ import scala.collection.concurrent.TrieMap
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
-import scala.collection.mutable
 import scala.util.Failure
 import scala.util.Success
 
@@ -118,8 +117,10 @@ trait MesosClientActor
                         tasks.update(taskId, del)
                         kill(taskID, taskStatus.getAgentId)
                     }
-                    //TODO: delete tasks in other states
-
+                    case _ => {
+                        //TODO: delete tasks in other states
+                        log.info("deleting non-running tasks not implemented")
+                    }
                 }
 
             case None =>
@@ -148,7 +149,7 @@ trait MesosClientActor
         oldTaskDetails match {
             case Submitted(taskInfo,hostname,promise) => {
                 event.getStatus.getState match {
-                    case TaskState.TASK_RUNNING =>
+                    case MesosTaskState.TASK_RUNNING =>
                         log.info(s"received TASK_RUNNING update for ${event.getStatus.getTaskId.getValue} and healthy? is ${event.getStatus.getHealthy}")
                         if (event.getStatus.getHealthy) {
                             //val agentHostname = agentHostnames.getOrElse(newTaskDetailsAgentId, s"unknown-agent-${newTaskDetailsAgentId}")
@@ -157,7 +158,7 @@ trait MesosClientActor
                             promise.success(running)
                             tasks.update(event.getStatus.getTaskId.getValue, running)
                         }
-                    case TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
+                    case MesosTaskState.TASK_STAGING | MesosTaskState.TASK_STARTING =>
                         log.info(s"task still launching task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
                     case _ =>
                         log.warning(s"failing task ${event.getStatus.getTaskId.getValue}  msg: ${event.getStatus.getMessage}")
@@ -170,9 +171,9 @@ trait MesosClientActor
             }
             case DeletePending(taskInfo,promise) => {
                 event.getStatus.getState match {
-                case TaskState.TASK_KILLED =>
+                case MesosTaskState.TASK_KILLED =>
                     promise.success(Deleted(taskInfo))
-                case TaskState.TASK_RUNNING | TaskState.TASK_KILLING | TaskState.TASK_STAGING | TaskState.TASK_STARTING =>
+                case MesosTaskState.TASK_RUNNING | MesosTaskState.TASK_KILLING | MesosTaskState.TASK_STAGING | MesosTaskState.TASK_STARTING =>
                     log.info(s"task still killing task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
                 case _ =>
                     promise.failure(new Exception(s"task ended in unexpected state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))

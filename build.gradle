@@ -41,14 +41,16 @@ dependencies {
     testCompile 'junit:junit:4.11'
 
 }
+group = 'com.adobe.api.platform.runtime'
+version = '0.0.1'
 
 bintray {
-    user = property('user')
-    key = property('key')
+    user = project.hasProperty('bintrayUser') ? project.property('bintrayUser') : System.getenv('BINTRAY_USER')
+    key = project.hasProperty('bintrayApiKey') ? project.property('bintrayApiKey') : System.getenv('BINTRAY_API_KEY')
     configurations = ['archives']
     pkg {
         repo = 'maven'
-        name = 'mesos-actor'
+        name = 'mesos'
         desc = 'An Akka based Mesos actor for creating Mesos frameworks.'
         userOrg = 'adobe-apiplatform'
         licenses = ['Apache-2.0']
