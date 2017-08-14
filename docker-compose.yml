@@ -4,6 +4,8 @@ services:
   zk:
     image: bobrik/zookeeper
     network_mode: host
+    pid: host
+    userns_mode: host
     environment:
       ZK_CONFIG: tickTime=2000,initLimit=10,syncLimit=5,maxClientCnxns=128,forceSync=no,clientPort=2181
       ZK_ID: 1
