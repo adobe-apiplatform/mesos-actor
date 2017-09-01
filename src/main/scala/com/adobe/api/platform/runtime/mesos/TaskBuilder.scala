@@ -15,9 +15,11 @@
 package com.adobe.api.platform.runtime.mesos
 
 import akka.event.LoggingAdapter
+import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.PortMapping
 import org.apache.mesos.v1.Protos.Offer
+import org.apache.mesos.v1.Protos.Resource
 import org.apache.mesos.v1.Protos.TaskInfo
 
 trait TaskBuilder {
-    def apply(reqs: TaskReqs, offer:Offer, ports:Int)(implicit logger:LoggingAdapter) : TaskInfo
+    def apply(reqs: TaskReqs, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(implicit logger:LoggingAdapter) : TaskInfo
 }

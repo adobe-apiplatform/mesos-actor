@@ -40,12 +40,11 @@ import scala.collection.mutable.ListBuffer
 package object mesos {
     object DefaultTaskMatcher extends TaskMatcher {
         override def matchTasksToOffers(role: String, t: Iterable[TaskReqs], o: Iterable[Offer],
-            builder: TaskBuilder)(implicit logger:LoggingAdapter): Map[OfferID, Seq[TaskInfo]] = {
+            builder: TaskBuilder)(implicit logger:LoggingAdapter): Map[OfferID, Seq[(TaskInfo, Seq[Int])]] = {
             //we can launch many tasks on a single offer
 
             var tasksInNeed: ListBuffer[TaskReqs] = t.to[ListBuffer]
-            var result = Map[OfferID, Seq[TaskInfo]]()
-            var portIndex = 0
+            var result = Map[OfferID, Seq[(TaskInfo, Seq[Int])]]()
             var acceptedOfferAgent: String = null //accepted offers must reside on single agent: https://github.com/apache/mesos/blob/master/src/master/validation.cpp#L1768
             o.map(offer => {
 
@@ -61,37 +60,87 @@ package object mesos {
                 val agentId = offer.getAgentId.getValue
                 if (hasSomePorts && (acceptedOfferAgent == null || acceptedOfferAgent == agentId)) {
                     acceptedOfferAgent = agentId
-                    val resources = offer.getResourcesList.asScala
+                    val resourcesRaw = offer.getResourcesList.asScala
                             .filter(_.getRole == role) //ignore resources with other roles
-                            .filter(res => Seq("cpus", "mem").contains(res.getName))
+                            .filter(res => Seq("cpus", "mem", "ports").contains(res.getName))
                             .groupBy(_.getName)
-                            .mapValues(resources => {
-                                resources.iterator.next().getScalar.getValue
-                            })
-                    if (resources.size == 2) {
+                    if (resourcesRaw.size == 3) {
+                        val resources = resourcesRaw.mapValues(resources => {
+                            resources.iterator.next().getScalar.getValue
+                        })
+
+
+
                         var remainingOfferCpus = resources("cpus")
                         var remainingOfferMem = resources("mem")
-                        var acceptedTasks = ListBuffer[TaskInfo]()
+                        var usedPorts = ListBuffer[Int]()
+                        var acceptedTasks = ListBuffer[(TaskInfo, Seq[Int])]()
                         tasksInNeed.map(task => {
 
                             val taskCpus = task.cpus
                             val taskMem = task.mem
 
+                            //collect ranges from ports resources
+                            val offerPortsRanges = offer.getResourcesList.asScala
+                                                                    .filter(res => res.getName == "ports").map(res => res.getRanges)
+                            //plunk the number of ports needed for this task
+                            val hostPorts = pluckPorts(offerPortsRanges, task.ports.size, usedPorts)
+
                             //check for a good fit
                             if (remainingOfferCpus > taskCpus &&
-                                    remainingOfferMem > taskMem) {
+                                    remainingOfferMem > taskMem &&
+                                    hostPorts.size == task.ports.size) {
+                                //mark resources as used
                                 remainingOfferCpus -= taskCpus
                                 remainingOfferMem -= taskMem
-                                //move the task from InNeed to Accepted
+                                usedPorts ++= hostPorts
 
-                                acceptedTasks += builder(task, offer, portIndex)
-                                portIndex += 1
+                                //build port mappings
+                                val portMappings = if (task.ports.isEmpty) List() else for (i <- task.ports.indices) yield PortMapping.newBuilder
+                                        .setContainerPort(task.ports(i))
+                                        .setHostPort(hostPorts(i))
+                                        .build()
+
+                                //build resources
+                                val taskResources = ListBuffer[Resource]()
+
+                                task.ports.indices.foreach(i => {
+                                    taskResources += Resource.newBuilder()
+                                            .setName("ports")
+                                            .setType(Value.Type.RANGES)
+                                            .setRanges(Ranges.newBuilder()
+                                                    .addRange(Value.Range.newBuilder()
+                                                            .setBegin(hostPorts(i))
+                                                            .setEnd(hostPorts(i))))
+                                            .build()
+                                })
+
+                                taskResources += Resource.newBuilder()
+                                    .setName("cpus")
+                                    .setRole("*")
+                                    .setType(Value.Type.SCALAR)
+                                    .setScalar(Value.Scalar.newBuilder
+                                        .setValue(taskCpus))
+                                    .build()
+
+                                taskResources += Resource.newBuilder
+                                    .setName("mem")
+                                    .setRole("*")
+                                    .setType(Value.Type.SCALAR)
+                                    .setScalar(Value.Scalar.newBuilder
+                                            .setValue(taskMem))
+                                    .build()
+
+                                //move the task from InNeed to Accepted
+                                acceptedTasks += (builder(task, offer, taskResources, portMappings) -> hostPorts)
                                 tasksInNeed -= task
                             }
                         })
                         if (!acceptedTasks.isEmpty) {
                             result += (offer.getId -> acceptedTasks)
                         }
+
+
                     }
 
                 } else {
@@ -105,89 +154,49 @@ package object mesos {
 
     object DefaultTaskBuilder extends TaskBuilder {
 
-        def apply(reqs: TaskReqs, offer: Offer, portIndex: Int)(implicit logger:LoggingAdapter): TaskInfo = {
-            val containerPort = reqs.port
-            //getting the port from the ranges is hard...
-            var hostPort = 0
-            var portSeekIndex = 0
-            val ranges = offer.getResourcesList.asScala
-                    .filter(res => res.getName == "ports").iterator.next().getRanges.getRangeList.asScala
-            require(ranges.size > 0, s"no available ports in resources for offer ${offer}")
-            val rangesIt = ranges.iterator
-            var rangeSeek = rangesIt.next()
-            var nextPort = rangeSeek.getBegin
-            while (portSeekIndex < portIndex) {
-                while (portSeekIndex < portIndex && nextPort < rangeSeek.getEnd) {
-                    portSeekIndex += 1
-                    nextPort += 1
-                }
-                if (portSeekIndex != portIndex) {
-                    rangeSeek = rangesIt.next()
-                    nextPort = rangeSeek.getBegin
-                }
-            }
-            if (portSeekIndex != portIndex) {
-                throw new RuntimeException("not enough ports matched in offer")
-            } else {
-                hostPort = nextPort.toInt
-            }
-
-            val agentHost = offer.getHostname
-            val dockerImage = reqs.dockerImage
-
-            val healthCheck = HealthCheck.newBuilder()
+        def apply(reqs: TaskReqs, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(implicit logger:LoggingAdapter): TaskInfo = {
+            val healthCheck = reqs.healthCheckPortIndex.map(i =>  HealthCheck.newBuilder()
                     .setType(HealthCheck.Type.TCP)
                     .setTcp(TCPCheckInfo.newBuilder()
-                            .setPort(containerPort))
+                            .setPort(reqs.ports(i) ))
                     .setDelaySeconds(0)
                     .setIntervalSeconds(1)
                     .setTimeoutSeconds(1)
                     .setGracePeriodSeconds(25)
+                    .build())
 
-            val task = TaskInfo.newBuilder
+            val environmentVars = reqs.environment.map(e => Protos.Environment.Variable.newBuilder
+                    .setName(e._1)
+                    .setValue(e._2)
+                    .build()).asJava
+
+
+            val taskBuilder = TaskInfo.newBuilder
                     .setName(reqs.taskId)
                     .setTaskId(TaskID.newBuilder
                             .setValue(reqs.taskId))
                     .setAgentId(offer.getAgentId)
                     .setCommand(CommandInfo.newBuilder
                             .setEnvironment(Protos.Environment.newBuilder
-                                    .addVariables(Protos.Environment.Variable.newBuilder
-                                            .setName("__OW_API_HOST")
-                                            .setValue(agentHost)))
+                                            .addAllVariables(environmentVars)
+                                            .build())
                             .setShell(false)
                             .build())
                     .setContainer(ContainerInfo.newBuilder
                             .setType(ContainerInfo.Type.DOCKER)
                             .setDocker(DockerInfo.newBuilder
-                                    .setImage(dockerImage)
+                                    .setImage(reqs.dockerImage)
                                     .setNetwork(DockerInfo.Network.BRIDGE)
-                                    .addPortMappings(PortMapping.newBuilder
-                                            .setContainerPort(containerPort)
-                                            .setHostPort(hostPort)
-                                            .build)
-                            ).build())
-                    .setHealthCheck(healthCheck)
-                    .addResources(Resource.newBuilder()
-                            .setName("ports")
-                            .setType(Value.Type.RANGES)
-                            .setRanges(Ranges.newBuilder()
-                                    .addRange(Value.Range.newBuilder()
-                                            .setBegin(hostPort)
-                                            .setEnd(hostPort))))
-                    .addResources(Resource.newBuilder
-                            .setName("cpus")
-                            .setRole("*")
-                            .setType(Value.Type.SCALAR)
-                            .setScalar(Value.Scalar.newBuilder
-                                    .setValue(reqs.cpus)))
-                    .addResources(Resource.newBuilder
-                            .setName("mem")
-                            .setRole("*")
-                            .setType(Value.Type.SCALAR)
-                            .setScalar(Value.Scalar.newBuilder
-                                    .setValue(reqs.mem)))
-                    .build
-            task
+                                    .addAllPortMappings(portMappings.asJava)
+                                    .build())
+
+                            .build())
+                    .addAllResources(resources.asJava)
+            healthCheck match {
+                case Some(hc) => taskBuilder.setHealthCheck(hc)
+                case None => //no health check
+            }
+            taskBuilder.build()
         }
     }
 
@@ -196,4 +205,22 @@ package object mesos {
 
     val protobufContentType = ContentType(MediaType.applicationBinary("x-protobuf", Compressible, "proto"))
 
+    def pluckPorts (rangesList: Iterable[org.apache.mesos.v1.Protos.Value.Ranges], numberOfPorts: Int, ignorePorts: Seq[Int]) = {
+        val ports = ListBuffer[Int]()
+        rangesList.foreach(ranges => {
+            ranges.getRangeList.asScala.foreach(r => {
+                val end = r.getEnd
+                var next = r.getBegin
+                while (ports.size < numberOfPorts && next <= end) {
+                    if (!ignorePorts.contains(next.toInt)) {
+                        ports += next.toInt
+                    }
+                    next +=1
+                }
+            }
+
+            )
+        })
+        ports.toList
+    }
 }

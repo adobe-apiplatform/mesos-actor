@@ -58,7 +58,7 @@ bintray {
     publications = ['MyPublication']
     pkg {
         repo = 'maven'
-        name = 'mesos'
+        name = 'mesos-actor'
         desc = 'An Akka based Mesos actor for creating Mesos frameworks.'
         userOrg = 'adobe-apiplatform'
         licenses = ['Apache-2.0']

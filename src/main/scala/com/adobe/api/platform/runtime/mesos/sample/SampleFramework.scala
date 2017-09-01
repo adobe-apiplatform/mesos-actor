@@ -71,15 +71,15 @@ object SampleFramework {
 
         val taskId = s"sample-task-0-${Instant.now.getEpochSecond}"
 
-        val task = TaskReqs(taskId, "trinitronx/python-simplehttpserver", 0.1, 24, 8080)
+        //in this sample, container port 8080 listens, and 8081 does NOT listen; so using 8081 for health checks will always fail
+        val task = TaskReqs(taskId, "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
 
         val launched: Future[Running] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[Running]
 
         launched map { taskDetails =>
-            //      val taskHost = taskDetails.taskStatus.getContainerStatus.getNetworkInfos(0).getIpAddresses(0)
             val taskHost = taskDetails.hostname
-            val taskPort = taskDetails.taskInfo.getResourcesList.asScala.filter(_.getName == "ports").iterator.next().getRanges.getRange(0).getBegin.toInt
-            log.info(s"launched task id ${taskDetails.taskInfo.getTaskId.getValue} with state ${taskDetails.taskStatus.getState} on host:port ${taskHost}:${taskPort}")
+            val taskPorts = taskDetails.hostports
+            log.info(s"launched task id ${taskDetails.taskInfo.getTaskId.getValue} with state ${taskDetails.taskStatus.getState} on agent ${taskHost} listening on ports ${taskPorts}")
 
             //schedule delete in 40 seconds
             system.scheduler.scheduleOnce(10.seconds) {

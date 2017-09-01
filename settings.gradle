@@ -1,5 +1,5 @@
 
-rootProject.name = 'mesos'
+rootProject.name = 'mesos-actor'
 gradle.ext.scala = [
     version: '2.11.8',
     compileFlags: ['-feature', '-unchecked', '-deprecation', '-Xfatal-warnings', '-Ywarn-unused-import']
