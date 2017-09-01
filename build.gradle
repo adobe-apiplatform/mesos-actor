@@ -22,12 +22,9 @@ dependencies {
     //akka
     compile "com.typesafe.akka:akka-actor_${scalaVersion}:${akkaVersion}"
     compile "com.typesafe.akka:akka-stream_${scalaVersion}:${akkaVersion}"
-    compile "com.typesafe.akka:akka-slf4j_${scalaVersion}:${akkaVersion}"
 
     //akka-http
     compile "com.typesafe.akka:akka-http_${scalaVersion}:${akkaHttpVersion}"
-    compile "com.typesafe.akka:akka-http-spray-json_${scalaVersion}:${akkaHttpVersion}"
-    compile "ch.qos.logback:logback-classic:1.1.7"
 
     //for mesos
     compile "org.apache.mesos:mesos:1.2.1"
@@ -42,7 +39,7 @@ dependencies {
 
 }
 group = 'com.adobe.api.platform.runtime'
-version = '0.0.1'
+version = '0.0.2'
 
 allprojects {
     repositories {
@@ -68,10 +65,10 @@ bintray {
         githubRepo = 'adobe-apiplatform/mesos-actor' //Optional Github repository
         githubReleaseNotesFile = 'Readme.md' //Optional Github readme file
         version {
-            name = '0.0.1'
-            desc = 'Mesos Actor 0.0.1'
+            name = '0.0.2'
+            desc = 'Mesos Actor 0.0.2'
             released  = new Date()
-            vcsTag = '0.0.1'
+            vcsTag = '0.0.2'
         }
     }
 }
@@ -122,7 +119,7 @@ publishing {
             artifact javadocJar
             groupId 'com.adobe.api.platform.runtime'
             artifactId 'mesos'
-            version '0.0.1'
+            version '0.0.2'
             pom.withXml {
                 def root = asNode()
                 root.appendNode('description', 'An Akka based Mesos actor for creating Mesos frameworks.')

@@ -34,7 +34,7 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
     it should "only use a single slave per accept" in {
         val offers = ProtobufUtil.getOffers("/offer1.json")
 
-        val tasks = List[TaskReqs](TaskReqs("taskId", "dockerImage:someTag", 0.1, 256, 8080))
+        val tasks = List[TaskReqs](TaskReqs("taskId", "dockerImage:someTag", 0.1, 256, List(8080)))
         val taskMap = DefaultTaskMatcher.matchTasksToOffers("*", tasks, offers.getOffersList.asScala, DefaultTaskBuilder)
 
         taskMap.size shouldBe 1
@@ -43,7 +43,7 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
     it should "not use an offer if the number of required ports are not available" in {
         val offers = ProtobufUtil.getOffers("/offer-noports.json")
 
-        val tasks = List[TaskReqs](TaskReqs("taskId", "dockerImage:someTag", 0.1, 256, 8080))
+        val tasks = List[TaskReqs](TaskReqs("taskId", "dockerImage:someTag", 0.1, 256, List(8080)))
         val taskMap = DefaultTaskMatcher.matchTasksToOffers("*", tasks, offers.getOffersList.asScala, DefaultTaskBuilder)
 
         taskMap.size shouldBe 0

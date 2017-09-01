@@ -86,7 +86,7 @@ class MesosClientTests extends TestKit(ActorSystem("MySpec")) with ImplicitSende
             expectMsg(subscribeCompleteMsg)
 
             //submit the task
-            mesosClient ! SubmitTask(TaskReqs("taskId1", "fake-docker-image", 0.1, 256, 8080))
+            mesosClient ! SubmitTask(TaskReqs("taskId1", "fake-docker-image", 0.1, 256, List(8080)))
 
             //receive offers
             mesosClient ! ProtobufUtil.getOffers("/offer1.json")
