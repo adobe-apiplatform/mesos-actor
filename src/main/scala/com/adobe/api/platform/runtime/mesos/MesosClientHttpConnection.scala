@@ -80,7 +80,8 @@ trait MesosClientHttpConnection extends MesosClientConnection {
                                 .setId(frameworkID)
                                 .setUser(Optional.ofNullable(System.getenv("user")).orElse("root")) // https://issues.apache.org/jira/browse/MESOS-3747
                                 .setName(frameworkName)
-                                .setFailoverTimeout(0)
+                                        .setFailoverTimeout(0)
+//                                .setFailoverTimeout(3*60*60)//time in seconds to restart framework with same ID
                                 //.setRole(role)
                                 .build)
                         .build())

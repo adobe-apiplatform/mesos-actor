@@ -51,7 +51,7 @@ package object mesos {
                 //TODO: manage explicit and default roles, similar to https://github.com/mesos/kafka/pull/103/files
                 val portsItr = offer.getResourcesList.asScala
                         .filter(res => res.getName == "ports").iterator
-                val hasSomePorts = !portsItr.isEmpty && portsItr.next().getRanges.getRangeList.size() > 0
+                val hasSomePorts = portsItr.nonEmpty && portsItr.next().getRanges.getRangeList.size() > 0
                 if (!hasSomePorts) {
                     //TODO: log info about skipping due to lack of ports...
                     logger.warning("no ports!!!")
@@ -59,20 +59,17 @@ package object mesos {
 
                 val agentId = offer.getAgentId.getValue
                 if (hasSomePorts && (acceptedOfferAgent == null || acceptedOfferAgent == agentId)) {
-                    acceptedOfferAgent = agentId
-                    val resourcesRaw = offer.getResourcesList.asScala
+                    val scalarResources = offer.getResourcesList.asScala
                             .filter(_.getRole == role) //ignore resources with other roles
                             .filter(res => Seq("cpus", "mem", "ports").contains(res.getName))
                             .groupBy(_.getName)
-                    if (resourcesRaw.size == 3) {
-                        val resources = resourcesRaw.mapValues(resources => {
-                            resources.iterator.next().getScalar.getValue
-                        })
+                            .mapValues(resources => {
+                                resources.iterator.next().getScalar.getValue
+                            })
 
-
-
-                        var remainingOfferCpus = resources("cpus")
-                        var remainingOfferMem = resources("mem")
+                    if (scalarResources.size == 3) {//map will contain ports even though they are not scalar values
+                        var remainingOfferCpus = scalarResources("cpus")
+                        var remainingOfferMem = scalarResources("mem")
                         var usedPorts = ListBuffer[Int]()
                         var acceptedTasks = ListBuffer[(TaskInfo, Seq[Int])]()
                         tasksInNeed.map(task => {
@@ -90,6 +87,10 @@ package object mesos {
                             if (remainingOfferCpus > taskCpus &&
                                     remainingOfferMem > taskMem &&
                                     hostPorts.size == task.ports.size) {
+
+                                acceptedOfferAgent = agentId
+
+
                                 //mark resources as used
                                 remainingOfferCpus -= taskCpus
                                 remainingOfferMem -= taskMem
@@ -172,7 +173,7 @@ package object mesos {
 
 
             val taskBuilder = TaskInfo.newBuilder
-                    .setName(reqs.taskId)
+                    .setName(reqs.taskName)
                     .setTaskId(TaskID.newBuilder
                             .setValue(reqs.taskId))
                     .setAgentId(offer.getAgentId)

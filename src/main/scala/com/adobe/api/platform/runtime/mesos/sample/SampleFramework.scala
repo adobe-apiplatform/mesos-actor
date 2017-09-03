@@ -67,25 +67,49 @@ object SampleFramework {
             log.info("subscribe completed successfully...")
         })
 
-        val taskId = s"sample-task-0-${Instant.now.getEpochSecond}"
+        var taskCount = 0
+        def nextName() = {
+            taskCount+=1
+            s"sample-task-${Instant.now.getEpochSecond}-${taskCount}"
+        }
+        def nextId() = "sample-task-" + UUID.randomUUID()
 
         //in this sample, container port 8080 listens, and 8081 does NOT listen; so using 8081 for health checks will always fail
-        val task = TaskReqs(taskId, "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
+        val task = TaskReqs(nextId(), nextName(),  "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
+        val task2 = TaskReqs(nextId(), nextName(), "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
+        val task3 = TaskReqs(nextId(), nextName(), "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
 
         val launched: Future[Running] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[Running]
+        val launched2: Future[Running] = mesosClientActor.ask(SubmitTask(task2))(taskLaunchTimeout).mapTo[Running]
+        val launched3: Future[Running] = mesosClientActor.ask(SubmitTask(task3))(taskLaunchTimeout).mapTo[Running]
 
-        launched map { taskDetails =>
+        log.info("submitted 3 tasks")
+        def killTask(taskDetails:Running) = {
             val taskHost = taskDetails.hostname
             val taskPorts = taskDetails.hostports
             log.info(s"launched task id ${taskDetails.taskInfo.getTaskId.getValue} with state ${taskDetails.taskStatus.getState} on agent ${taskHost} listening on ports ${taskPorts}")
 
             //schedule delete in 40 seconds
             system.scheduler.scheduleOnce(10.seconds) {
-                log.info(s"removing previously created task ${taskId}")
-                mesosClientActor.ask(DeleteTask(taskId))(taskDeleteTimeout).mapTo[TaskStatus].map(taskStatus => {
+                log.info(s"removing previously created task ${taskDetails.taskInfo.getTaskId.getValue}")
+                mesosClientActor.ask(DeleteTask(taskDetails.taskInfo.getTaskId.getValue))(taskDeleteTimeout).mapTo[TaskStatus].map(taskStatus => {
                     log.info(s"task killed ended with state ${taskStatus.getState}")
                 })
             }
+        }
+
+        launched map { taskDetails =>
+            killTask(taskDetails)
+        } recover {
+            case t => log.error(s"task launch failed ${t.getMessage}", t)
+        }
+        launched2 map { taskDetails =>
+            killTask(taskDetails)
+        } recover {
+            case t => log.error(s"task launch failed ${t.getMessage}", t)
+        }
+        launched3 map { taskDetails =>
+            killTask(taskDetails)
         } recover {
             case t => log.error(s"task launch failed ${t.getMessage}", t)
         }
