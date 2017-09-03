@@ -20,16 +20,17 @@ import akka.pattern.ask
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
 import com.adobe.api.platform.runtime.mesos.DeleteTask
+import com.adobe.api.platform.runtime.mesos.Deleted
 import com.adobe.api.platform.runtime.mesos.MesosClient
 import com.adobe.api.platform.runtime.mesos.Running
 import com.adobe.api.platform.runtime.mesos.SubmitTask
 import com.adobe.api.platform.runtime.mesos.Subscribe
 import com.adobe.api.platform.runtime.mesos.SubscribeComplete
-import com.adobe.api.platform.runtime.mesos.TaskReqs
+import com.adobe.api.platform.runtime.mesos.TaskDef
+import com.adobe.api.platform.runtime.mesos.TaskState
 import com.adobe.api.platform.runtime.mesos.Teardown
 import java.time.Instant
 import java.util.UUID
-import org.apache.mesos.v1.Protos.TaskStatus
 import scala.concurrent.Await
 import scala.concurrent.Future
 import scala.concurrent.duration._
@@ -75,13 +76,13 @@ object SampleFramework {
         def nextId() = "sample-task-" + UUID.randomUUID()
 
         //in this sample, container port 8080 listens, and 8081 does NOT listen; so using 8081 for health checks will always fail
-        val task = TaskReqs(nextId(), nextName(),  "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
-        val task2 = TaskReqs(nextId(), nextName(), "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
-        val task3 = TaskReqs(nextId(), nextName(), "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
+        val task = TaskDef(nextId(), nextName(),  "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
+        val task2 = TaskDef(nextId(), nextName(), "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
+        val task3 = TaskDef(nextId(), nextName(), "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
 
-        val launched: Future[Running] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[Running]
-        val launched2: Future[Running] = mesosClientActor.ask(SubmitTask(task2))(taskLaunchTimeout).mapTo[Running]
-        val launched3: Future[Running] = mesosClientActor.ask(SubmitTask(task3))(taskLaunchTimeout).mapTo[Running]
+        val launched: Future[TaskState] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskState]
+        val launched2: Future[TaskState] = mesosClientActor.ask(SubmitTask(task2))(taskLaunchTimeout).mapTo[TaskState]
+        val launched3: Future[TaskState] = mesosClientActor.ask(SubmitTask(task3))(taskLaunchTimeout).mapTo[TaskState]
 
         log.info("submitted 3 tasks")
         def killTask(taskDetails:Running) = {
@@ -92,24 +93,31 @@ object SampleFramework {
             //schedule delete in 40 seconds
             system.scheduler.scheduleOnce(10.seconds) {
                 log.info(s"removing previously created task ${taskDetails.taskInfo.getTaskId.getValue}")
-                mesosClientActor.ask(DeleteTask(taskDetails.taskInfo.getTaskId.getValue))(taskDeleteTimeout).mapTo[TaskStatus].map(taskStatus => {
-                    log.info(s"task killed ended with state ${taskStatus.getState}")
+                mesosClientActor.ask(DeleteTask(taskDetails.taskInfo.getTaskId.getValue))(taskDeleteTimeout).mapTo[Deleted].map(deleted => {
+                    log.info(s"task killed ended with state ${deleted.taskStatus.getState}")
                 })
             }
         }
 
-        launched map { taskDetails =>
-            killTask(taskDetails)
+        launched map {
+            case r:Running => killTask(r)
+            case s => log.error(s"failed to launch task; state is ${s}")
+
+
         } recover {
             case t => log.error(s"task launch failed ${t.getMessage}", t)
         }
-        launched2 map { taskDetails =>
-            killTask(taskDetails)
+        launched2 map {
+            case r:Running => killTask(r)
+            case s => log.error(s"failed to launch task; state is ${s}")
+
         } recover {
             case t => log.error(s"task launch failed ${t.getMessage}", t)
         }
-        launched3 map { taskDetails =>
-            killTask(taskDetails)
+        launched3 map {
+            case r:Running => killTask(r)
+            case s => log.error(s"failed to launch task; state is ${s}")
+
         } recover {
             case t => log.error(s"task launch failed ${t.getMessage}", t)
         }

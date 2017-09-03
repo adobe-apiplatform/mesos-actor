@@ -32,7 +32,7 @@ import com.adobe.api.platform.runtime.mesos.Subscribe
 import com.adobe.api.platform.runtime.mesos.SubscribeComplete
 import com.adobe.api.platform.runtime.mesos.TaskBuilder
 import com.adobe.api.platform.runtime.mesos.TaskMatcher
-import com.adobe.api.platform.runtime.mesos.TaskReqs
+import com.adobe.api.platform.runtime.mesos.TaskDef
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.Protos.TaskID
@@ -86,7 +86,7 @@ class MesosClientTests extends TestKit(ActorSystem("MySpec")) with ImplicitSende
             expectMsg(subscribeCompleteMsg)
 
             //submit the task
-            mesosClient ! SubmitTask(TaskReqs("taskId1", "taskId1", "fake-docker-image", 0.1, 256, List(8080), Some(0),
+            mesosClient ! SubmitTask(TaskDef("taskId1", "taskId1", "fake-docker-image", 0.1, 256, List(8080), Some(0),
                 environment = Map("__OW_API_HOST" -> "192.168.99.100")))
 
             //receive offers

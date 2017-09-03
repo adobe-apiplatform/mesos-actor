@@ -39,11 +39,11 @@ import scala.collection.mutable.ListBuffer
 
 package object mesos {
     object DefaultTaskMatcher extends TaskMatcher {
-        override def matchTasksToOffers(role: String, t: Iterable[TaskReqs], o: Iterable[Offer],
+        override def matchTasksToOffers(role: String, t: Iterable[TaskDef], o: Iterable[Offer],
             builder: TaskBuilder)(implicit logger:LoggingAdapter): Map[OfferID, Seq[(TaskInfo, Seq[Int])]] = {
             //we can launch many tasks on a single offer
 
-            var tasksInNeed: ListBuffer[TaskReqs] = t.to[ListBuffer]
+            var tasksInNeed: ListBuffer[TaskDef] = t.to[ListBuffer]
             var result = Map[OfferID, Seq[(TaskInfo, Seq[Int])]]()
             var acceptedOfferAgent: String = null //accepted offers must reside on single agent: https://github.com/apache/mesos/blob/master/src/master/validation.cpp#L1768
             o.map(offer => {
@@ -155,7 +155,7 @@ package object mesos {
 
     object DefaultTaskBuilder extends TaskBuilder {
 
-        def apply(reqs: TaskReqs, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(implicit logger:LoggingAdapter): TaskInfo = {
+        def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(implicit logger:LoggingAdapter): TaskInfo = {
             val healthCheck = reqs.healthCheckPortIndex.map(i =>  HealthCheck.newBuilder()
                     .setType(HealthCheck.Type.TCP)
                     .setTcp(TCPCheckInfo.newBuilder()

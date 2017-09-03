@@ -46,7 +46,7 @@ import scala.util.Failure
 import scala.util.Success
 
 //control messages
-case class SubmitTask(task: TaskReqs)
+case class SubmitTask(task: TaskDef)
 
 case class DeleteTask(taskId: String)
 
@@ -69,15 +69,15 @@ case object Host extends Network
 case class User(name: String) extends Network
 
 //data
-case class TaskReqs(taskId: String, taskName: String, dockerImage: String, cpus: Double, mem: Int, ports: Seq[Int] = List(), healthCheckPortIndex: Option[Int] = None, forcePull: Boolean = false, network:Network = Bridge, dockerRunParameters: Map[String, String] = Map(), environment: Map[String, String] = Map())
+case class TaskDef(taskId: String, taskName: String, dockerImage: String, cpus: Double, mem: Int, ports: Seq[Int] = List(), healthCheckPortIndex: Option[Int] = None, forcePull: Boolean = false, network:Network = Bridge, dockerRunParameters: Map[String, String] = Map(), environment: Map[String, String] = Map())
 
 //task states
 sealed abstract class TaskState()
-case class SubmitPending(reqs:TaskReqs, promise: Promise[Running]) extends TaskState
+case class SubmitPending(reqs:TaskDef, promise: Promise[Running]) extends TaskState
 case class Submitted(pending:SubmitPending, taskInfo: TaskInfo, offer: OfferID, hostname: String, hostports: Seq[Int] = List(), promise: Promise[Running]) extends TaskState
 case class Running(taskInfo:TaskInfo, taskStatus:TaskStatus, hostname: String, hostports: Seq[Int] = List()) extends TaskState
 case class DeletePending(taskInfo:TaskInfo, promise: Promise[Deleted]) extends TaskState
-case class Deleted(taskInfo:TaskInfo) extends TaskState
+case class Deleted(taskInfo:TaskInfo, taskStatus:TaskStatus) extends TaskState
 
 //TODO: mesos authentication
 trait MesosClientActor
@@ -188,7 +188,7 @@ trait MesosClientActor
                 case DeletePending(taskInfo,promise) => {
                     event.getStatus.getState match {
                     case MesosTaskState.TASK_KILLED =>
-                        promise.success(Deleted(taskInfo))
+                        promise.success(Deleted(taskInfo, event.getStatus))
                     case MesosTaskState.TASK_RUNNING | MesosTaskState.TASK_KILLING | MesosTaskState.TASK_STAGING | MesosTaskState.TASK_STARTING =>
                         log.info(s"task still killing task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
                     case _ =>
