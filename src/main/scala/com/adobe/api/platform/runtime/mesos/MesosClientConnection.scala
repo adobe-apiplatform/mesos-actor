@@ -21,5 +21,5 @@ import scala.concurrent.Future
 
 trait MesosClientConnection {
     def exec(call: Call): Future[HttpResponse]
-    def subscribe(frameworkID: FrameworkID, frameworkName: String): Future[SubscribeComplete]
+    def subscribe(frameworkID: FrameworkID, frameworkName: String, failoverTimeoutSecond: Double): Future[SubscribeComplete]
 }

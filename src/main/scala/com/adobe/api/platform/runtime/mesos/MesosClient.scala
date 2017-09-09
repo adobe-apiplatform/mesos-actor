@@ -42,6 +42,8 @@ import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
+import scala.concurrent.duration.Duration
+import scala.concurrent.duration.FiniteDuration
 import scala.util.Failure
 import scala.util.Success
 
@@ -88,6 +90,7 @@ trait MesosClientActor
 
     val id: String
     val frameworkName: String
+    val failoverTimeoutSeconds: FiniteDuration
     val master: String
     val role: String
     val taskMatcher: TaskMatcher
@@ -104,7 +107,7 @@ trait MesosClientActor
     override def receive: Receive = {
         //control messages
         case Subscribe => {
-            subscribe(frameworkID, frameworkName).pipeTo(sender())
+            subscribe(frameworkID, frameworkName, failoverTimeoutSeconds.toSeconds).pipeTo(sender())
         }
         case SubmitTask(task) => {
             val taskPromise = Promise[Running]()
@@ -412,6 +415,7 @@ trait MesosClientActor
 }
 
 class MesosClient(val id: String, val frameworkName: String, val master: String, val role: String,
+    val failoverTimeoutSeconds: FiniteDuration,
     val taskMatcher: TaskMatcher,
     val taskBuilder: TaskBuilder) extends MesosClientActor with MesosClientHttpConnection {
 
@@ -419,10 +423,10 @@ class MesosClient(val id: String, val frameworkName: String, val master: String,
 
 object MesosClient {
 
-    def props(id: String, frameworkName: String, master: String, role: String,
+    def props(id: String, frameworkName: String, master: String, role: String, failoverTimeoutSeconds: FiniteDuration,
         taskMatcher: TaskMatcher = DefaultTaskMatcher,
         taskBuilder: TaskBuilder = DefaultTaskBuilder): Props =
-        Props(new MesosClient(id, frameworkName, master, role, taskMatcher, taskBuilder))
+        Props(new MesosClient(id, frameworkName, master, role, failoverTimeoutSeconds, taskMatcher, taskBuilder))
 
     //TODO: allow task persistence/reconcile
 

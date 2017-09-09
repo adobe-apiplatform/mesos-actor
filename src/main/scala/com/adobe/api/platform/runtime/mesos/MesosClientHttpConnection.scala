@@ -66,7 +66,8 @@ trait MesosClientHttpConnection extends MesosClientConnection {
                 .runWith(Sink.head)
     }
 
-    def subscribe(frameworkID: FrameworkID, frameworkName: String): Future[SubscribeComplete] = {
+
+    def subscribe(frameworkID: FrameworkID, frameworkName: String, failoverTimeoutSecond: Double): Future[SubscribeComplete] = {
 
         import EventStreamUnmarshalling._
 
@@ -80,9 +81,8 @@ trait MesosClientHttpConnection extends MesosClientConnection {
                                 .setId(frameworkID)
                                 .setUser(Optional.ofNullable(System.getenv("user")).orElse("root")) // https://issues.apache.org/jira/browse/MESOS-3747
                                 .setName(frameworkName)
-                                        .setFailoverTimeout(0)
-//                                .setFailoverTimeout(3*60*60)//time in seconds to restart framework with same ID
-                                //.setRole(role)
+                                 .setFailoverTimeout(failoverTimeoutSeconds.toSeconds)
+                                .setRole(role)
                                 .build)
                         .build())
                 .build()

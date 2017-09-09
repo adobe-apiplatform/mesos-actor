@@ -59,10 +59,9 @@ object SampleFramework {
             "sample-" + UUID.randomUUID(),
             "sample-framework",
             "http://192.168.99.100:5050",
-            "*"
+            "sample-role",
+            30.seconds
         ))
-
-        //mesosClientActor ! Subscribe
 
         mesosClientActor.ask(Subscribe)(subscribeTimeout).mapTo[SubscribeComplete].onComplete(complete => {
             log.info("subscribe completed successfully...")
@@ -123,12 +122,12 @@ object SampleFramework {
         }
 
         //handle shutdown
-        CoordinatedShutdown(system).addJvmShutdownHook {
-            println("custom JVM shutdown hook...")
-            val complete: Future[Any] = mesosClientActor.ask(Teardown)(teardownTimeout)
-            val result = Await.result(complete, 10.seconds)
-            log.info("teardown completed!")
-        }
+//        CoordinatedShutdown(system).addJvmShutdownHook {
+//            println("custom JVM shutdown hook...")
+//            val complete: Future[Any] = mesosClientActor.ask(Teardown)(teardownTimeout)
+//            val result = Await.result(complete, 10.seconds)
+//            log.info("teardown completed!")
+//        }
 
     }
 
