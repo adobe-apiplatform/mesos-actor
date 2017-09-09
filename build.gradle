@@ -69,6 +69,10 @@ bintray {
             desc = 'Mesos Actor 0.0.2'
             released  = new Date()
             vcsTag = '0.0.2'
+            gpg {
+                sign = true //Determines whether to GPG sign the files. The default is false
+                //passphrase = System.getenv('BINTRAY_GPG_PASSPHRASE') //Optional. The passphrase for GPG signing'
+            }
         }
     }
 }
