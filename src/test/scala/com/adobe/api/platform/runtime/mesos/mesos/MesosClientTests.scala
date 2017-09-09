@@ -59,6 +59,7 @@ class MesosClientTests extends TestKit(ActorSystem("MySpec")) with ImplicitSende
         override val role: String = "*"
         override val taskMatcher: TaskMatcher = DefaultTaskMatcher
         override val taskBuilder: TaskBuilder = DefaultTaskBuilder
+        override val failoverTimeoutSeconds = 0.seconds
 
         override def exec(call: Call): Future[HttpResponse] = {
             log.info(s"sending ${call.getType}")
@@ -69,7 +70,7 @@ class MesosClientTests extends TestKit(ActorSystem("MySpec")) with ImplicitSende
             }
         }
 
-        override def subscribe(frameworkID: FrameworkID, frameworkName: String): Future[SubscribeComplete] = {
+        override def subscribe(frameworkID: FrameworkID, frameworkName: String, failoverTimeout: Double): Future[SubscribeComplete] = {
             Future.successful(subscribeCompleteMsg)
         }
     }))
