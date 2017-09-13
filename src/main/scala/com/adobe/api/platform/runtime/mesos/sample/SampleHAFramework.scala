@@ -3,9 +3,10 @@ package com.adobe.api.platform.runtime.mesos.sample
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
 import akka.cluster.{Cluster, ClusterEvent}
 import akka.cluster.ClusterEvent._
+import com.typesafe.config.{Config, ConfigFactory}
 
 object SampleHAFramework {
-  def main(args: Array[String]): Unit = {
+ /* def _simple_main(args: Array[String]): Unit = {
     val marathonConfig = MarathonConfig.discoverAkkaConfig()
     val clusterName: String = marathonConfig.getString("akka.cluster.name")
 
@@ -14,8 +15,29 @@ object SampleHAFramework {
 
     // Create an actor that handles cluster domain events
     system.actorOf(Props[SimpleClusterListener], name = "clusterListener")
-  }
+  }*/
 
+
+  def main(args: Array[String]): Unit = {
+    val config: Config = ConfigFactory.load()
+
+    System.out.println(config.toString)
+
+    val clusterName: String = config.getString("akka.cluster.name")
+
+    System.out.println(s"Starting a cluster named: ${clusterName}" )
+
+    // Create an Akka system
+    val system = ActorSystem(clusterName)
+
+    // Create an actor that handles cluster domain events
+    system.actorOf(Props[SimpleClusterListener], name = "clusterListener")
+
+    val seedNodes = MarathonConfig.getSeedNodes(config)
+    System.out.println(s"joining cluster with seed nodes ${seedNodes}")
+    Cluster(system).joinSeedNodes(seedNodes.toList)
+
+  }
 }
 
 class SimpleClusterListener extends Actor with ActorLogging {
