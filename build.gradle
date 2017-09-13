@@ -14,7 +14,7 @@ repositories {
 
 ext {
     scalaVersion = "2.11"
-    akkaVersion = "2.5.1"
+    akkaVersion = "2.5.3"
     akkaHttpVersion = "10.0.6"
 }
 dependencies {
@@ -22,6 +22,12 @@ dependencies {
     //akka
     compile "com.typesafe.akka:akka-actor_${scalaVersion}:${akkaVersion}"
     compile "com.typesafe.akka:akka-stream_${scalaVersion}:${akkaVersion}"
+
+    //akka-cluster
+    compile "com.typesafe.akka:akka-remote_${scalaVersion}:${akkaVersion}"
+    compile "com.typesafe.akka:akka-cluster_${scalaVersion}:${akkaVersion}"
+    compile "com.typesafe.akka:akka-cluster-metrics_${scalaVersion}:${akkaVersion}"
+    compile "com.typesafe.akka:akka-cluster-tools_${scalaVersion}:${akkaVersion}"
 
     //akka-http
     compile "com.typesafe.akka:akka-http_${scalaVersion}:${akkaHttpVersion}"
