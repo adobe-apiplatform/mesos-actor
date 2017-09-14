@@ -92,6 +92,8 @@ class SimpleClusterListener extends Actor with ActorLogging {
       log.info("Member is Up: {}", member.address)
     case UnreachableMember(member) =>
       log.info("Member detected as unreachable: {}", member)
+      //TODO: verify down at marathon, then remove
+      Cluster.get(context.system).down(member.address)
     case MemberRemoved(member, previousStatus) =>
       log.info("Member is Removed: {} after {}",
         member.address, previousStatus)
