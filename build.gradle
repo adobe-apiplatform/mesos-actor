@@ -31,7 +31,7 @@ dependencies {
     compile "com.typesafe.akka:akka-cluster_${scalaVersion}:${akkaVersion}"
     compile "com.typesafe.akka:akka-cluster-metrics_${scalaVersion}:${akkaVersion}"
     compile "com.typesafe.akka:akka-cluster-tools_${scalaVersion}:${akkaVersion}"
-
+    compile "com.typesafe.akka:akka-distributed-data_${scalaVersion}:${akkaVersion}"
     //akka-http
     compile "com.typesafe.akka:akka-http_${scalaVersion}:${akkaHttpVersion}"
 

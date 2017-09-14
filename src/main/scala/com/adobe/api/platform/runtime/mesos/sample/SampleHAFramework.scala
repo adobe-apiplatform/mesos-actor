@@ -5,12 +5,22 @@ import akka.actor.Address
 import akka.actor.{Actor, ActorLogging, ActorSystem, Props}
 import akka.cluster.{Cluster, ClusterEvent}
 import akka.cluster.ClusterEvent._
+import akka.cluster.ddata.DistributedData
+import akka.cluster.ddata.LWWMap
+import akka.cluster.ddata.LWWMapKey
+import akka.cluster.ddata.Replicator.Get
+import akka.cluster.ddata.Replicator.GetSuccess
+import akka.cluster.ddata.Replicator.ReadLocal
+import akka.cluster.ddata.Replicator.Update
+import akka.cluster.ddata.Replicator.WriteLocal
 import com.adobe.api.platform.runtime.mesos.MesosClient
 import com.adobe.api.platform.runtime.mesos.Subscribe
 import com.adobe.api.platform.runtime.mesos.SubscribeComplete
 import com.typesafe.config.{Config, ConfigFactory}
 import scala.concurrent.duration._
 import akka.pattern.ask
+import akka.util.Timeout
+import java.util.UUID
 
 object SampleHAFramework {
  /* def _simple_main(args: Array[String]): Unit = {
@@ -44,12 +54,20 @@ object SampleHAFramework {
     System.out.println(s"joining cluster with seed nodes ${seedNodes}")
     Cluster(system).joinSeedNodes(seedNodes.toList)
 
+
+    //if I am the leader, create some tasks
+
+
+
+
   }
 }
 
 class SimpleClusterListener extends Actor with ActorLogging {
+  val replicator:ActorRef = DistributedData(context.system).replicator
 
-  val cluster = Cluster(context.system)
+
+  implicit val cluster = Cluster(context.system)
   var isSubscribed = false
   var mesosClientActor:ActorRef = null
   val subscribeTimeout = 30.seconds
@@ -101,26 +119,72 @@ class SimpleClusterListener extends Actor with ActorLogging {
       mesosClientActor = null
     }
   }
+  val key = "FWID"
+  implicit val askTimeout = Timeout(30.seconds)
+
+  def dataKey(entryKey: String): LWWMapKey[String, Any] =
+    LWWMapKey("cache-" + math.abs(entryKey.hashCode) % 100)
 
   def subscribe(): Unit = {
     if (leader.exists(_ == cluster.selfAddress)) {
-      log.info("subscribing as mesos framework")
+      log.info("attempting to get FWID from distributed cache...")
+      val fwId = getFWID()
+      fwId.map (id => {
+        log.info(s"acquired (or created) FWID ${id}")
+        log.info(s"subscribing as mesos framework id ${id}")
+        mesosClientActor = context.system.actorOf(MesosClient.props(
+          id,
+          "sample-framework",
+          "http://192.168.99.100:5050",
+          "sample-role",
+          5.minutes
+        ))
 
-      mesosClientActor = context.system.actorOf(MesosClient.props(
-        "sample-" + "12345678",//UUID.randomUUID()
-        "sample-framework",
-        "http://192.168.99.100:5050",
-        "sample-role",
-        5.minutes
-      ))
-
-      mesosClientActor.ask(Subscribe)(subscribeTimeout).mapTo[SubscribeComplete].onComplete(complete => {
-        log.info("subscribe completed successfully...")
-        isSubscribed = true
+        mesosClientActor.ask(Subscribe)(subscribeTimeout).mapTo[SubscribeComplete].onComplete(complete => {
+          log.info("subscribe completed successfully...")
+          isSubscribed = true
+        })
       })
+
     } else {
       log.info("leader changed before subscribe was fired")
     }
-
   }
+
+  def getFWID() = {
+
+    //check for NotFound
+    val cacheResult = replicator.ask(Get(dataKey(key), ReadLocal, Some(Request(key, sender()))))
+    cacheResult.map {
+      case s: GetSuccess[_] => {
+        s.dataValue match {
+          case data: LWWMap[_, _] => data.asInstanceOf[LWWMap[String, String]].get(key) match {
+            case Some(fwid) =>
+              log.info(s"returning cached fwid ${fwid}")
+              fwid
+            case None => {
+              val fwid = "sample-" + UUID.randomUUID()
+              log.info(s"found but none; returning new fwid ${fwid}")
+              fwid
+            }
+          }
+          case _ => {
+            val fwid = "sample-" + UUID.randomUUID()
+            log.info(s"found wrong data; returning new fwid ${fwid}")
+            fwid
+          }
+        }
+      }
+      case _ => {
+        val fwid = "sample-" + UUID.randomUUID()
+        log.info(s"none found; returning new fwid ${fwid}")
+        log.info("updating cache with new FWID")
+        replicator ! Update(dataKey(key), LWWMap(), WriteLocal)(_ + (key -> fwid))
+        fwid
+      }
+    }
+  }
+  private final case class Request(key: String, replyTo: ActorRef)
+
+
 }
