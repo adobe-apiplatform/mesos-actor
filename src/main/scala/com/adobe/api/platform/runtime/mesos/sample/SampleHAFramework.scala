@@ -23,18 +23,6 @@ import akka.util.Timeout
 import java.util.UUID
 
 object SampleHAFramework {
- /* def _simple_main(args: Array[String]): Unit = {
-    val marathonConfig = MarathonConfig.discoverAkkaConfig()
-    val clusterName: String = marathonConfig.getString("akka.cluster.name")
-
-    // Create an Akka system
-    val system = ActorSystem(clusterName, marathonConfig)
-
-    // Create an actor that handles cluster domain events
-    system.actorOf(Props[SimpleClusterListener], name = "clusterListener")
-  }*/
-
-
   def main(args: Array[String]): Unit = {
     val config: Config = ConfigFactory.load()
 
@@ -53,19 +41,12 @@ object SampleHAFramework {
     val seedNodes = MarathonConfig.getSeedNodes(config)
     System.out.println(s"joining cluster with seed nodes ${seedNodes}")
     Cluster(system).joinSeedNodes(seedNodes.toList)
-
-
-    //if I am the leader, create some tasks
-
-
-
-
   }
 }
 
 class SimpleClusterListener extends Actor with ActorLogging {
+  val config: Config = ConfigFactory.load()
   val replicator:ActorRef = DistributedData(context.system).replicator
-
 
   implicit val cluster = Cluster(context.system)
   var isSubscribed = false
@@ -136,9 +117,9 @@ class SimpleClusterListener extends Actor with ActorLogging {
         log.info(s"subscribing as mesos framework id ${id}")
         mesosClientActor = context.system.actorOf(MesosClient.props(
           id,
-          "sample-framework",
-          "http://192.168.99.100:5050",
-          "sample-role",
+          config.getString("mesos-actor.framework.name"),
+          config.getString("mesos-actor.master"),
+          config.getString("mesos-actor.framework.role"),
           5.minutes
         ))
 
