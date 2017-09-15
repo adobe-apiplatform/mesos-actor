@@ -37,6 +37,7 @@ services:
       MESOS_HOSTNAME: ${DOCKER_IP}
       MESOS_ADVERTISE_IP: ${DOCKER_IP}
       MESOS_WORK_DIR: /tmp/mesos
+      MESOS_NO_STRICT: "true"
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup
       - /usr/local/bin/docker:/usr/bin/docker
@@ -58,6 +59,7 @@ services:
       MESOS_HOSTNAME: ${DOCKER_IP}
       MESOS_ADVERTISE_IP: ${DOCKER_IP}
       MESOS_WORK_DIR: /tmp/mesos
+      MESOS_NO_STRICT: "true"
     volumes:
       - /sys/fs/cgroup:/sys/fs/cgroup
       - /usr/local/bin/docker:/usr/bin/docker
