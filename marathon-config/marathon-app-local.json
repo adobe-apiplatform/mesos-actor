@@ -2,9 +2,9 @@
   "id": "/akka-cluster",
   "cmd": null,
   "cpus": 0.1,
-  "mem": 256,
+  "mem": 128,
   "disk": 0,
-  "instances": 2,
+  "instances": 3,
   "container": {
     "type": "DOCKER",
     "volumes": [],
