@@ -31,7 +31,8 @@ jobs:
 #          # fallback to using the latest cache if no exact match is found
 #          - v1-dependencies-
 
-      - run: make all
+      - run: ./gradlew build
+      - run: docker build -t adobeapiplatform/mesos-actor .
 
 #      - save_cache:
 #          paths:
