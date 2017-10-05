@@ -17,14 +17,14 @@ jobs:
       - checkout
       - setup_remote_docker
       - restore_cache:
-        keys:
-          - dependency-cache-{{ checksum "build.gradle" }}
-          # fallback to using the latest cache if no exact match is found
-          - dependency-cache-
+          keys:
+            - dependency-cache-{{ checksum "build.gradle" }}
+            # fallback to using the latest cache if no exact match is found
+            - dependency-cache-
       - run: ./gradlew build
       - run: docker build -t adobeapiplatform/mesos-actor .
       - save_cache:
-        paths:
-          - ~/.gradle
-        key: dependency-cache-{{ checksum "build.gradle" }}
+          paths:
+            - ~/.gradle
+          key: dependency-cache-{{ checksum "build.gradle" }}
 
