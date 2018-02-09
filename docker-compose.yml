@@ -8,7 +8,7 @@ services:
       ZOO_PORT: 2188
 
   master:
-    image: mesosphere/mesos-master:1.2.1
+    image: mesosphere/mesos-master:${MESOS_VERSION-1.2.1}
     entrypoint:
       - sh
       - -c
@@ -21,8 +21,13 @@ services:
       - zk
 
   slave:
-    image: mesosphere/mesos-slave:1.2.1
+    image: mesosphere/mesos-slave:${MESOS_VERSION-1.2.1}
     privileged: true
+# See:  https://issues.apache.org/jira/browse/MESOS-3793
+    # entrypoint:
+    #   - /bin/bash
+    #   - -c
+    #   - dockerd & until docker run --rm hello-world; do echo "Waiting for docker";sleep 2; done;MESOS_HOSTNAME=$$(ip route | tail -n 1 | cut -d ' ' -f 12) mesos-slave --launcher=posix
     entrypoint:
       - sh
       - -c
@@ -36,7 +41,7 @@ services:
       - zk
 
   marathon:
-    image: mesosphere/marathon:v1.3.10
+    image: mesosphere/marathon:${MARATHON_VERSION-v1.3.10}
     entrypoint:
       - sh 
       - -c
