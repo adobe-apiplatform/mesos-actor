@@ -26,8 +26,10 @@ import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.PortMapping
 import org.apache.mesos.v1.Protos.HealthCheck
 import org.apache.mesos.v1.Protos.HealthCheck.TCPCheckInfo
+import org.apache.mesos.v1.Protos.NetworkInfo
 import org.apache.mesos.v1.Protos.Offer
 import org.apache.mesos.v1.Protos.OfferID
+import org.apache.mesos.v1.Protos.Parameter
 import org.apache.mesos.v1.Protos.Resource
 import org.apache.mesos.v1.Protos.TaskID
 import org.apache.mesos.v1.Protos.TaskInfo
@@ -171,7 +173,22 @@ package object mesos {
                     .setValue(e._2)
                     .build()).asJava
 
+            val parameters = reqs.dockerRunParameters.flatMap { case (k, v) =>
+              v.map(pv => Parameter.newBuilder().setKey(k).setValue(pv).build())
+            }.asJava
 
+            val dockerNetwork = reqs.network match {
+              case _: User => DockerInfo.Network.USER
+              case Host => DockerInfo.Network.HOST
+              case Bridge => DockerInfo.Network.BRIDGE
+            }
+
+            //for case of user network, create a single NetworkInfo with the name
+            val networkInfos = reqs.network match {
+              case u: User => Seq[NetworkInfo](NetworkInfo.newBuilder()
+                      .setName(u.name).build()).asJava
+              case _ => Seq[NetworkInfo]().asJava
+            }
             val taskBuilder = TaskInfo.newBuilder
                     .setName(reqs.taskName)
                     .setTaskId(TaskID.newBuilder
@@ -185,9 +202,11 @@ package object mesos {
                             .build())
                     .setContainer(ContainerInfo.newBuilder
                             .setType(ContainerInfo.Type.DOCKER)
+                            .addAllNetworkInfos(networkInfos)
                             .setDocker(DockerInfo.newBuilder
                                     .setImage(reqs.dockerImage)
-                                    .setNetwork(DockerInfo.Network.BRIDGE)
+                                    .setNetwork(dockerNetwork)
+                                    .addAllParameters(parameters)
                                     .addAllPortMappings(portMappings.asJava)
                                     .build())
 
