@@ -71,7 +71,7 @@ case object Host extends Network
 case class User(name: String) extends Network
 
 //data
-case class TaskDef(taskId: String, taskName: String, dockerImage: String, cpus: Double, mem: Int, ports: Seq[Int] = List(), healthCheckPortIndex: Option[Int] = None, forcePull: Boolean = false, network:Network = Bridge, dockerRunParameters: Map[String, String] = Map(), environment: Map[String, String] = Map())
+case class TaskDef(taskId: String, taskName: String, dockerImage: String, cpus: Double, mem: Int, ports: Seq[Int] = List(), healthCheckPortIndex: Option[Int] = None, forcePull: Boolean = false, network:Network = Bridge, dockerRunParameters: Map[String, Set[String]] = Map(), environment: Map[String, String] = Map())
 
 //task states
 sealed abstract class TaskState()

@@ -22,12 +22,12 @@ RUN \
 
 #
 # Copy app jars
-ADD build/distributions/mesos-actor-0.0.3.tar ./
+ADD build/distributions/mesos-actor-*.tar ./
 ENV MESOS_ACTOR_OPTS -Dconfig.resource=application_ha.conf
 ENV LIBPROCESS_IP 0.0.0.0
 ENV HOST 0.0.0.0
 ENV PORT_2551 2551
 
-CMD ./mesos-actor-0.0.3/bin/mesos-actor
+CMD ./mesos-actor-*/bin/mesos-actor
 
 EXPOSE 8080

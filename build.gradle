@@ -1,6 +1,6 @@
 
 plugins {
-    id "com.jfrog.bintray" version "1.7.3"
+    id "com.jfrog.bintray" version "1.8.0"
 }
 
 
@@ -48,7 +48,7 @@ dependencies {
 
 }
 group = 'com.adobe.api.platform.runtime'
-version = '0.0.3'
+version = '0.0.4'
 
 allprojects {
     repositories {
@@ -65,7 +65,7 @@ bintray {
     pkg {
         repo = 'maven'
         name = 'mesos-actor'
-        desc = 'An Akka based Mesos actor for creating Mesos frameworks.'
+        desc = 'An Akka based actor for creating Apache Mesos frameworks.'
         userOrg = 'adobe-apiplatform'
         licenses = ['Apache-2.0']
         vcsUrl = 'https://github.com/adobe-apiplatform/mesos-actor.git'
@@ -74,10 +74,10 @@ bintray {
         githubRepo = 'adobe-apiplatform/mesos-actor' //Optional Github repository
         githubReleaseNotesFile = 'Readme.md' //Optional Github readme file
         version {
-            name = '0.0.3'
-            desc = 'Mesos Actor 0.0.3'
+            name = project.version
+            desc = 'Actor library for Apache Mesos'
             released  = new Date()
-            vcsTag = '0.0.3'
+            vcsTag = project.version
             gpg {
                 sign = true //Determines whether to GPG sign the files. The default is false
                 //passphrase = System.getenv('BINTRAY_GPG_PASSPHRASE') //Optional. The passphrase for GPG signing'
@@ -132,11 +132,11 @@ publishing {
             artifact javadocJar
             groupId 'com.adobe.api.platform.runtime'
             artifactId 'mesos-actor'
-            version '0.0.3'
+            version project.version
             pom.withXml {
                 def root = asNode()
-                root.appendNode('description', 'An Akka based Mesos actor for creating Mesos frameworks.')
-                root.appendNode('name', 'Adobe API Platform Mesos Actor')
+                root.appendNode('description', 'An Akka based actor for creating Apache Mesos frameworks.')
+                root.appendNode('name', 'Adobe API Platform Actor for Apache Mesos')
                 root.appendNode('url', 'https://github.com/adobe-apiplatform/mesos-actor')
                 root.children().last() + pomConfig
             }
