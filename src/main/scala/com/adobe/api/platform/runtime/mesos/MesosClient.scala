@@ -20,7 +20,9 @@ import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.event.LoggingAdapter
 import akka.http.scaladsl.model.HttpResponse
+import akka.pattern.ask
 import akka.pattern.pipe
+import akka.util.Timeout
 import java.net.URI
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.ExecutorID
@@ -29,21 +31,20 @@ import org.apache.mesos.v1.Protos.Offer
 import org.apache.mesos.v1.Protos.OfferID
 import org.apache.mesos.v1.Protos.TaskID
 import org.apache.mesos.v1.Protos.TaskInfo
-import org.apache.mesos.v1.Protos.{TaskState => MesosTaskState}
 import org.apache.mesos.v1.Protos.TaskStatus
+import org.apache.mesos.v1.Protos.TaskStatus.Reason
+import org.apache.mesos.v1.Protos.{TaskState => MesosTaskState}
 import org.apache.mesos.v1.scheduler.Protos.Call
 import org.apache.mesos.v1.scheduler.Protos.Call._
 import org.apache.mesos.v1.scheduler.Protos.Event
-import org.apache.mesos.v1.scheduler.Protos.Event._
 import scala.collection.JavaConversions._
 import scala.collection.JavaConverters._
-import scala.collection.concurrent.TrieMap
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
-import scala.concurrent.duration.Duration
 import scala.concurrent.duration.FiniteDuration
+import scala.concurrent.duration._
 import scala.util.Failure
 import scala.util.Success
 
@@ -59,7 +60,7 @@ case object Subscribe
 case object Teardown
 
 //events
-case class SubscribeComplete()
+case class SubscribeComplete(id: String)
 
 case object TeardownComplete
 
@@ -77,9 +78,9 @@ case class TaskDef(taskId: String, taskName: String, dockerImage: String, cpus: 
 sealed abstract class TaskState()
 case class SubmitPending(reqs:TaskDef, promise: Promise[Running]) extends TaskState
 case class Submitted(pending:SubmitPending, taskInfo: TaskInfo, offer: OfferID, hostname: String, hostports: Seq[Int] = List(), promise: Promise[Running]) extends TaskState
-case class Running(taskInfo:TaskInfo, taskStatus:TaskStatus, hostname: String, hostports: Seq[Int] = List()) extends TaskState
-case class DeletePending(taskInfo:TaskInfo, promise: Promise[Deleted]) extends TaskState
-case class Deleted(taskInfo:TaskInfo, taskStatus:TaskStatus) extends TaskState
+case class Running(taskId: String, agentId: String, taskStatus:TaskStatus, hostname: String, hostports: Seq[Int] = List()) extends TaskState
+case class DeletePending(taskId:String, promise: Promise[Deleted]) extends TaskState
+case class Deleted(taskId:String, taskStatus:TaskStatus) extends TaskState
 
 //TODO: mesos authentication
 trait MesosClientActor
@@ -88,30 +89,61 @@ trait MesosClientActor
     implicit val logger: LoggingAdapter = context.system.log
     implicit val actorSystem: ActorSystem = context.system
 
-    val id: String
+    val id: () => String
     val frameworkName: String
     val failoverTimeoutSeconds: FiniteDuration
     val master: String
     val role: String
     val taskMatcher: TaskMatcher
     val taskBuilder: TaskBuilder
+    val subscribeTimeout = Timeout(5 seconds)
+    val autoSubscribe: Boolean
+    val tasks: TaskStore
+    var reconcilationData:mutable.Map[String, ReconcileTaskState] = mutable.Map()
 
-    private lazy val frameworkID = FrameworkID.newBuilder().setValue(id).build();
+    if (autoSubscribe){
+        log.info(s"auto-subscribing ${self} to mesos master at ${master}")
+        self.ask(Subscribe)(subscribeTimeout).mapTo[SubscribeComplete].onComplete(complete => {
+            log.info("subscribe completed successfully...")
+            reconcilationData = mutable.Map() ++ tasks.reconcileData
+            log.info(s"reconciliation data ${reconcilationData}")
+            val recoveryData = reconcilationData.map(t => TaskRecoveryDetail(t._1, t._2.agentId))
+            if (!recoveryData.isEmpty){
+                log.info(s"reconciling ${recoveryData.size} tasks")
+                recoveryData.foreach(d => {
+                    log.info(s"           ${d.taskId} -> ${d.agentId}")
+                })
+                reconcile(recoveryData)
+            }
+
+        })
+    }
+
+    private val frameworkID = FrameworkID.newBuilder().setValue(id()).build();
 
     //TODO: handle redirect to master see https://github.com/mesosphere/mesos-rxjava/blob/d6fd040af3322552012fb3dcf61debb9886adbf3/mesos-rxjava-client/src/main/java/com/mesosphere/mesos/rx/java/MesosClient.java#L167
     val mesosUri = URI.create(s"${master}/api/v1/scheduler")
     var streamId: String = null
-    private val tasks: TrieMap[String, TaskState] = TrieMap()
+    var subscribed: Option[Future[SubscribeComplete]] = None
+    //private val tasks = mutable.Map[String, TaskState]()
 
     //TODO: FSM for handling subscribing, subscribed, failed, etc states
     override def receive: Receive = {
         //control messages
         case Subscribe => {
-            subscribe(frameworkID, frameworkName, failoverTimeoutSeconds.toSeconds).pipeTo(sender())
+            val notifyRecipient = sender()
+            //handle multiple subscribe messages - only subscribe once, but reply to all on SubscribeComplete
+            if (subscribed.isEmpty){
+                log.info("new subscription initiating")
+                subscribed = Some(subscribe(frameworkID, frameworkName, failoverTimeoutSeconds.toSeconds).pipeTo(notifyRecipient))
+            } else {
+                log.info("subscription already initiated")
+                subscribed.get.map(c => notifyRecipient ! c)
+            }
         }
         case SubmitTask(task) => {
             val taskPromise = Promise[Running]()
-            tasks += (task.taskId -> SubmitPending(task, taskPromise))
+            tasks.update(task.taskId, SubmitPending(task, taskPromise))
             taskPromise.future.pipeTo(sender())
         }
         case DeleteTask(taskId) => {
@@ -121,8 +153,8 @@ trait MesosClientActor
             tasks.get(taskID.getValue) match {
             case Some(taskDetails) =>
                 taskDetails match {
-                    case Running(taskInfo, taskStatus, _, _) => {
-                        val del = DeletePending(taskInfo, deletePromise)
+                    case Running(taskId, _ , taskStatus, _, _) => {
+                        val del = DeletePending(taskId, deletePromise)
                         tasks.update(taskId, del)
                         kill(taskID, taskStatus.getAgentId)
                     }
@@ -142,70 +174,75 @@ trait MesosClientActor
 
 
         //event messages
-        case event: Update => handleUpdate(event)
-        case event: Offers => handleOffers(event)
-        case event: Subscribed => handleSubscribed(event)
+        case event: Event.Update => handleUpdate(event)
+        case event: Event.Offers => handleOffers(event)
+        case event: Event.Subscribed => handleSubscribed(event)
         case event: Event => handleHeartbeat(event)
 
         case msg => log.warning(s"unknown msg: ${msg}")
     }
 
-    def handleUpdate(event: Update) = {
+    def handleUpdate(event: Event.Update) = {
         val taskId = event.getStatus.getTaskId.getValue
+        log.info(s"received update for task ${event.getStatus.getTaskId.getValue} in state ${event.getStatus.getState}")
 
-        if (!tasks.contains(taskId)){
-            log.warning(s"ignoring update for unknown task ${taskId} in state ${event.getStatus.getState}")
-        } else {
-            log.info(s"received update for known task ${event.getStatus.getTaskId.getValue} in state ${event.getStatus.getState}")
+        //TODO: handle case of unknown task?
+        val oldTaskDetails = tasks.get(taskId)
 
-            //TODO: handle case of unknown task?
-            val oldTaskDetails = tasks(taskId)
-
-            oldTaskDetails match {
-                case Submitted(_, taskInfo, _, hostname, hostports, promise) => {
-                    event.getStatus.getState match {
-                        case MesosTaskState.TASK_RUNNING =>
-                            if (!taskInfo.hasHealthCheck || event.getStatus.getHealthy) {
-                                log.info(s"completed task launch for ${event.getStatus.getTaskId.getValue} has healthChek? ${taskInfo.hasHealthCheck} is healthy? ${event.getStatus.getHealthy}")
-                                //val agentHostname = agentHostnames.getOrElse(newTaskDetailsAgentId, s"unknown-agent-${newTaskDetailsAgentId}")
-                                //require(hostname == agentHostname, s"hostname ${agentHostname} didn't match ${hostname}")
-
-                                val running = Running(taskInfo, event.getStatus, hostname, hostports)
-                                promise.success(running)
-                                tasks.update(event.getStatus.getTaskId.getValue, running)
-                            } else {
-                                log.info(s"waiting for task health for ${event.getStatus.getTaskId.getValue} ")
-                            }
-                        case MesosTaskState.TASK_STAGING | MesosTaskState.TASK_STARTING =>
-                            log.info(s"task still launching task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
-                        case _ =>
-                            log.warning(s"failing task ${event.getStatus.getTaskId.getValue}  msg: ${event.getStatus.getMessage}")
-                            promise.failure(new Exception(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
-                    }
-                }
-                case r:Running => {
-                    log.info(s"task ${event.getStatus.getTaskId.getValue} changed from TASK_RUNNING to ${toCompactJsonString(event.getStatus)}")
-                    //TODO: handle TASK_LOST, etc here
-                    tasks.update(event.getStatus.getTaskId.getValue, r)
-                }
-                case DeletePending(taskInfo,promise) => {
-                    event.getStatus.getState match {
-                    case MesosTaskState.TASK_KILLED =>
-                        promise.success(Deleted(taskInfo, event.getStatus))
-                    case MesosTaskState.TASK_RUNNING | MesosTaskState.TASK_KILLING | MesosTaskState.TASK_STAGING | MesosTaskState.TASK_STARTING =>
-                        log.info(s"task still killing task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
+        oldTaskDetails match {
+            case Some(Submitted(_, taskInfo, _, hostname, hostports, promise)) => {
+                event.getStatus.getState match {
+                    case MesosTaskState.TASK_RUNNING =>
+                        if (!taskInfo.hasHealthCheck || event.getStatus.getHealthy) {
+                            log.info(s"completed task launch for ${event.getStatus.getTaskId.getValue} has healthChek? ${taskInfo.hasHealthCheck} is healthy? ${event.getStatus.getHealthy}")
+                            val running = Running(taskId, taskInfo.getAgentId.getValue, event.getStatus, hostname, hostports)
+                            promise.success(running)
+                            tasks.update(event.getStatus.getTaskId.getValue, running)
+                        } else {
+                            log.info(s"waiting for task health for ${event.getStatus.getTaskId.getValue} ")
+                        }
+                    case MesosTaskState.TASK_STAGING | MesosTaskState.TASK_STARTING =>
+                        log.info(s"task still launching task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
                     case _ =>
-                        promise.failure(new Exception(s"task ended in unexpected state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
-                    }
+                        log.warning(s"failing task ${event.getStatus.getTaskId.getValue}  msg: ${event.getStatus.getMessage}")
+                        promise.failure(new Exception(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
                 }
-
-                case _ =>
-                    log.warning(s"unexpected task status ${oldTaskDetails} for update event ${event}")
-                    tasks.foreach(t => log.info(s"      ${t}"))
-
             }
-        }
+            case Some(r:Running) => {
+                log.info(s"task ${event.getStatus.getTaskId.getValue} changed from TASK_RUNNING to ${toCompactJsonString(event.getStatus)}")
+                //TODO: handle TASK_LOST, etc here
+                tasks.update(event.getStatus.getTaskId.getValue, r)
+            }
+            case Some(DeletePending(taskInfo,promise)) => {
+                event.getStatus.getState match {
+                case MesosTaskState.TASK_KILLED =>
+                    promise.success(Deleted(taskId, event.getStatus))
+                    tasks.remove(taskId)
+                case MesosTaskState.TASK_RUNNING | MesosTaskState.TASK_KILLING | MesosTaskState.TASK_STAGING | MesosTaskState.TASK_STARTING =>
+                    log.info(s"task still killing task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
+                case _ =>
+                    promise.failure(new Exception(s"task ended in unexpected state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
+                }
+            }
+            case None if event.getStatus.getReason == Reason.REASON_RECONCILIATION => {
+                event.getStatus.getState match {
+                    case MesosTaskState.TASK_RUNNING =>
+                        log.info(s"recovered task id ${taskId} in state ${event.getStatus.getState}")
+                        reconcilationData.remove(taskId) match {
+                        case Some (taskReconcileData) =>
+                            tasks.update(taskId, Running(taskId, taskReconcileData.agentId, event.getStatus, taskReconcileData.hostname, taskReconcileData.hostports))
+                        case None =>
+                            log.error(s"no reconciliation data found for task ${taskId}")
+                        }
+                    case _ => log.info(s"mesos-actor does not currently reconcile tasks in state ${event.getStatus.getState}")
+                }
+            }
 
+            case _ =>
+                log.warning(s"unexpected task status ${oldTaskDetails} for update event ${event}")
+                tasks.foreach(t => log.info(s"      ${t}"))
+
+        }
         acknowledge(event.getStatus)
     }
 
@@ -225,7 +262,7 @@ trait MesosClientActor
         }
     }
 
-    def handleOffers(event: Offers) = {
+    def handleOffers(event: Event.Offers) = {
 
         log.info(s"received ${event.getOffersList.size} offers: ${toCompactJsonString(event);}")
 
@@ -299,11 +336,11 @@ trait MesosClientActor
         log.info(s"received heartbeat...")
     }
 
-    def handleSubscribed(event: Subscribed) = {
+    def handleSubscribed(event: Event.Subscribed) = {
 
         //TODO: persist to zk...
         //https://github.com/foursquare/scala-zookeeper-client
-        log.info(s"subscribed; frameworkId is ${event.getFrameworkId}")
+        log.info(s"subscribed; frameworkId is ${event.getFrameworkId} streamId is ${streamId}")
     }
 
     def teardown(): Future[TeardownComplete.type] = {
@@ -414,19 +451,23 @@ trait MesosClientActor
     }
 }
 
-class MesosClient(val id: String, val frameworkName: String, val master: String, val role: String,
+class MesosClient(val id: () => String, val frameworkName: String, val master: String, val role: String,
     val failoverTimeoutSeconds: FiniteDuration,
     val taskMatcher: TaskMatcher,
-    val taskBuilder: TaskBuilder) extends MesosClientActor with MesosClientHttpConnection {
+    val taskBuilder: TaskBuilder,
+    val autoSubscribe: Boolean,
+    val tasks: TaskStore) extends MesosClientActor with MesosClientHttpConnection {
 
 }
 
 object MesosClient {
 
-    def props(id: String, frameworkName: String, master: String, role: String, failoverTimeoutSeconds: FiniteDuration,
+    def props(id: ()=>String, frameworkName: String, master: String, role: String, failoverTimeoutSeconds: FiniteDuration,
         taskMatcher: TaskMatcher = DefaultTaskMatcher,
-        taskBuilder: TaskBuilder = DefaultTaskBuilder): Props =
-        Props(new MesosClient(id, frameworkName, master, role, failoverTimeoutSeconds, taskMatcher, taskBuilder))
+        taskBuilder: TaskBuilder = DefaultTaskBuilder,
+        autoSubscribe: Boolean = false,
+        taskStore: TaskStore): Props =
+        Props(new MesosClient(id, frameworkName, master, role, failoverTimeoutSeconds, taskMatcher, taskBuilder, autoSubscribe, taskStore))
 
     //TODO: allow task persistence/reconcile
 
@@ -440,5 +481,6 @@ object MesosClient {
                                 .setType(Offer.Operation.Type.LAUNCH)
                                 .setLaunch(Offer.Operation.Launch.newBuilder
                                         .addAllTaskInfos(tasks)))).build
+
 }
 

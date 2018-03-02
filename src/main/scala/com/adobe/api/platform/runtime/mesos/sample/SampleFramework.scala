@@ -15,12 +15,12 @@
 package com.adobe.api.platform.runtime.mesos.sample
 
 import akka.actor.ActorSystem
-import akka.actor.CoordinatedShutdown
 import akka.pattern.ask
 import akka.stream.ActorMaterializer
 import akka.util.Timeout
 import com.adobe.api.platform.runtime.mesos.DeleteTask
 import com.adobe.api.platform.runtime.mesos.Deleted
+import com.adobe.api.platform.runtime.mesos.LocalTaskStore
 import com.adobe.api.platform.runtime.mesos.MesosClient
 import com.adobe.api.platform.runtime.mesos.Running
 import com.adobe.api.platform.runtime.mesos.SubmitTask
@@ -36,12 +36,12 @@ import scala.concurrent.Future
 import scala.concurrent.duration._
 
 /**
- * Created by tnorris on 6/5/17.
+ * An example of a Mesos Framework. It will:
+ * - start the framework communication with mesos master
+ * - launch 3 tasks
+ * - kill each task after 10s
+ * - tear down the framework after 30s, then exits
  */
-class SampleFramework {
-
-}
-
 object SampleFramework {
 
     def main(args: Array[String]): Unit = {
@@ -56,11 +56,12 @@ object SampleFramework {
         val teardownTimeout = Timeout(5 seconds)
 
         val mesosClientActor = system.actorOf(MesosClient.props(
-            "sample-" + UUID.randomUUID(),
+            ()=> "sample-" + UUID.randomUUID(),
             "sample-framework",
             "http://192.168.99.100:5050",
             "sample-role",
-            30.seconds
+            30.seconds,
+            taskStore = new LocalTaskStore
         ))
 
         mesosClientActor.ask(Subscribe)(subscribeTimeout).mapTo[SubscribeComplete].onComplete(complete => {
@@ -74,60 +75,37 @@ object SampleFramework {
         }
         def nextId() = "sample-task-" + UUID.randomUUID()
 
-        //in this sample, container port 8080 listens, and 8081 does NOT listen; so using 8081 for health checks will always fail
-        val task = TaskDef(nextId(), nextName(),  "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
-        val task2 = TaskDef(nextId(), nextName(), "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
-        val task3 = TaskDef(nextId(), nextName(), "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
+        (1 to 3).foreach(_ => {
+            val task = TaskDef(nextId(), nextName(),  "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
+            val launched: Future[TaskState] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskState]
+            launched map {
+                case taskDetails:Running => {
+                    val taskHost = taskDetails.hostname
+                    val taskPorts = taskDetails.hostports
+                    log.info(s"launched task id ${taskDetails.taskId} with state ${taskDetails.taskStatus.getState} on agent ${taskHost} listening on ports ${taskPorts}")
 
-        val launched: Future[TaskState] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskState]
-        val launched2: Future[TaskState] = mesosClientActor.ask(SubmitTask(task2))(taskLaunchTimeout).mapTo[TaskState]
-        val launched3: Future[TaskState] = mesosClientActor.ask(SubmitTask(task3))(taskLaunchTimeout).mapTo[TaskState]
-
-        log.info("submitted 3 tasks")
-        def killTask(taskDetails:Running) = {
-            val taskHost = taskDetails.hostname
-            val taskPorts = taskDetails.hostports
-            log.info(s"launched task id ${taskDetails.taskInfo.getTaskId.getValue} with state ${taskDetails.taskStatus.getState} on agent ${taskHost} listening on ports ${taskPorts}")
-
-            //schedule delete in 40 seconds
-            system.scheduler.scheduleOnce(10.seconds) {
-                log.info(s"removing previously created task ${taskDetails.taskInfo.getTaskId.getValue}")
-                mesosClientActor.ask(DeleteTask(taskDetails.taskInfo.getTaskId.getValue))(taskDeleteTimeout).mapTo[Deleted].map(deleted => {
-                    log.info(s"task killed ended with state ${deleted.taskStatus.getState}")
-                })
+                    //schedule delete in 10 seconds
+                    system.scheduler.scheduleOnce(10.seconds) {
+                        log.info(s"removing previously created task ${taskDetails.taskId}")
+                        mesosClientActor.ask(DeleteTask(taskDetails.taskId))(taskDeleteTimeout).mapTo[Deleted].map(deleted => {
+                            log.info(s"task killed ended with state ${deleted.taskStatus.getState}")
+                        })
+                    }
+                }
+                case s => log.error(s"failed to launch task; state is ${s}")
+            } recover {
+                case t => log.error(s"task launch failed ${t.getMessage}", t)
             }
+        })
+
+        system.scheduler.scheduleOnce(30.seconds) {
+            val complete: Future[Any] = mesosClientActor.ask(Teardown)(teardownTimeout)
+            Await.result(complete, 10.seconds)
+            println("teardown completed!")
+            system.terminate().map(_ =>
+                System.exit(0)
+            )
         }
-
-        launched map {
-            case r:Running => killTask(r)
-            case s => log.error(s"failed to launch task; state is ${s}")
-
-
-        } recover {
-            case t => log.error(s"task launch failed ${t.getMessage}", t)
-        }
-        launched2 map {
-            case r:Running => killTask(r)
-            case s => log.error(s"failed to launch task; state is ${s}")
-
-        } recover {
-            case t => log.error(s"task launch failed ${t.getMessage}", t)
-        }
-        launched3 map {
-            case r:Running => killTask(r)
-            case s => log.error(s"failed to launch task; state is ${s}")
-
-        } recover {
-            case t => log.error(s"task launch failed ${t.getMessage}", t)
-        }
-
-        //handle shutdown
-//        CoordinatedShutdown(system).addJvmShutdownHook {
-//            println("custom JVM shutdown hook...")
-//            val complete: Future[Any] = mesosClientActor.ask(Teardown)(teardownTimeout)
-//            val result = Await.result(complete, 10.seconds)
-//            log.info("teardown completed!")
-//        }
 
     }
 

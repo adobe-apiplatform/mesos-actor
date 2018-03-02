@@ -16,6 +16,7 @@ package com.adobe.api.platform.runtime.mesos.mesos
 
 import akka.actor.ActorSystem
 import akka.actor.Props
+import akka.cluster.Cluster
 import akka.http.scaladsl.model.HttpResponse
 import akka.http.scaladsl.model.StatusCodes
 import akka.pattern.ask
@@ -24,6 +25,7 @@ import akka.testkit.TestKit
 import akka.util.Timeout
 import com.adobe.api.platform.runtime.mesos.DefaultTaskBuilder
 import com.adobe.api.platform.runtime.mesos.DefaultTaskMatcher
+import com.adobe.api.platform.runtime.mesos.LocalTaskStore
 import com.adobe.api.platform.runtime.mesos.MesosClientActor
 import com.adobe.api.platform.runtime.mesos.MesosClientConnection
 import com.adobe.api.platform.runtime.mesos.Running
@@ -33,6 +35,7 @@ import com.adobe.api.platform.runtime.mesos.SubscribeComplete
 import com.adobe.api.platform.runtime.mesos.TaskBuilder
 import com.adobe.api.platform.runtime.mesos.TaskMatcher
 import com.adobe.api.platform.runtime.mesos.TaskDef
+import com.adobe.api.platform.runtime.mesos.TaskStore
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.Protos.TaskID
@@ -52,14 +55,17 @@ class MesosClientTests extends TestKit(ActorSystem("MySpec")) with ImplicitSende
         TestKit.shutdownActorSystem(system)
     }
 
-    val subscribeCompleteMsg = SubscribeComplete()
-    val mesosClient = system.actorOf(Props(new MesosClientActor with MesosClientConnection {override val id: String = "testid"
+    val subscribeCompleteMsg = SubscribeComplete("someid")
+    val mesosClient = system.actorOf(Props(new MesosClientActor with MesosClientConnection {override val id = ()=>"testid"
         override val frameworkName: String = "testframework"
         override val master: String = "none"
         override val role: String = "*"
         override val taskMatcher: TaskMatcher = DefaultTaskMatcher
         override val taskBuilder: TaskBuilder = DefaultTaskBuilder
         override val failoverTimeoutSeconds = 0.seconds
+        override val autoSubscribe: Boolean = false
+        override val tasks: TaskStore = new LocalTaskStore
+
 
         override def exec(call: Call): Future[HttpResponse] = {
             log.info(s"sending ${call.getType}")
@@ -144,7 +150,7 @@ class MesosClientTests extends TestKit(ActorSystem("MySpec")) with ImplicitSende
                     .setAgentId(agentId)
                     .setHealthy(true).build()
             val runningTaskInfo = ProtobufUtil.getTaskInfo("/taskdetails.json")
-            val expectedTaskDetails = Running(runningTaskInfo, runningTaskStatus, "192.168.99.100", List(11001))
+            val expectedTaskDetails = Running("taskId1", agentId.getValue, runningTaskStatus, "192.168.99.100", List(11001))
 
             expectMsg(expectedTaskDetails)
 

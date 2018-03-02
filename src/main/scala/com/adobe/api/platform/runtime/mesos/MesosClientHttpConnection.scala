@@ -29,8 +29,9 @@ import akka.stream.Attributes
 import akka.stream.FlowShape
 import akka.stream.Inlet
 import akka.stream.Outlet
+import akka.stream.OverflowStrategy
 import akka.stream.alpakka.recordio.scaladsl.RecordIOFraming
-import akka.stream.scaladsl.Flow
+import akka.stream.scaladsl.Keep
 import akka.stream.scaladsl.Sink
 import akka.stream.scaladsl.Source
 import akka.stream.stage.GraphStage
@@ -45,14 +46,22 @@ import org.apache.mesos.v1.scheduler.Protos.Call
 import org.apache.mesos.v1.scheduler.Protos.Event
 import scala.concurrent.Future
 import scala.concurrent.Promise
+import scala.util.Failure
+import scala.util.Success
 
 trait MesosClientHttpConnection extends MesosClientConnection {
     this: MesosClientActor =>
     implicit val materializer:ActorMaterializer = ActorMaterializer()
 
-    val connectionFlow: Flow[HttpRequest, HttpResponse, Future[Http.OutgoingConnection]] = {
-        Http().outgoingConnection(host = mesosUri.getHost, port = mesosUri.getPort)
-    }
+    val poolClientFlow = Http().cachedHostConnectionPool[Promise[HttpResponse]](host = mesosUri.getHost, port = mesosUri.getPort)
+    val queue =
+        Source.queue[(HttpRequest, Promise[HttpResponse])](100, OverflowStrategy.backpressure)
+                .via(poolClientFlow)
+                .toMat(Sink.foreach({
+                  case ((Success(resp), p)) => p.success(resp)
+                  case ((Failure(e), p))    => p.failure(e)
+                }))(Keep.left)
+                .run()
 
     def exec(call: Call): Future[HttpResponse] = {
         log.info(s"sending ${call.getType}")
@@ -60,10 +69,9 @@ trait MesosClientHttpConnection extends MesosClientConnection {
                 .withHeaders(
                     RawHeader("Mesos-Stream-Id", streamId))
                 .withEntity(protobufContentType, call.toByteArray)
-
-        Source.single(req)
-                .via(connectionFlow)
-                .runWith(Sink.head)
+        val responsePromise = Promise[HttpResponse]()
+        queue.offer(req, responsePromise)
+        responsePromise.future
     }
 
 
@@ -102,7 +110,7 @@ trait MesosClientHttpConnection extends MesosClientConnection {
                         if (streamId == null) {
                             logger.info(s"setting new streamId ${newStreamId}")
                             streamId = newStreamId
-                            result.success(SubscribeComplete())
+                            result.success(SubscribeComplete(frameworkID.getValue))
                         } else if (streamId != newStreamId) {
                             //TODO: do we need to handle StreamId changes?
                             logger.warning(s"streamId has changed! ${streamId}  ${newStreamId}")
