@@ -49,7 +49,7 @@ dependencies {
 
 }
 group = 'com.adobe.api.platform.runtime'
-version = '0.0.4'
+version = "${version}"
 
 allprojects {
     repositories {
