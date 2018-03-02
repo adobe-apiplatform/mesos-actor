@@ -3,87 +3,51 @@ version: "3"
 services:
   zk:
     image: zookeeper:3.4
-    ports:
-      - 2188:2188
     environment:
       ZOO_MY_ID: 1
       ZOO_PORT: 2188
 
   master:
-    image: mesosphere/mesos-master:1.2.1
-    network_mode: host
-    pid: host
-    userns_mode: host
-    privileged: true
+    image: mesosphere/mesos-master:${MESOS_VERSION-1.2.1}
+    entrypoint:
+      - sh
+      - -c
+      - MESOS_HOSTNAME=$$(ip route | tail -n 1 | cut -d ' ' -f 12) mesos-master --registry=in_memory
     environment:
-      MESOS_ZK: zk://${DOCKER_IP}:2188/mesos
-      MESOS_QUORUM: 1
+      MESOS_ZK: zk://zk:2188/mesos
+      MESOS_QUORUM: 3
       MESOS_CLUSTER: docker-compose
-      MESOS_HOSTNAME: ${DOCKER_IP}
     depends_on:
       - zk
 
-  slave-one:
-    image: mesosphere/mesos-slave:1.2.1
-    network_mode: host
-    pid: host
-    userns_mode: host
+  slave:
+    image: mesosphere/mesos-slave:${MESOS_VERSION-1.2.1}
     privileged: true
+# See:  https://issues.apache.org/jira/browse/MESOS-3793
+    # entrypoint:
+    #   - /bin/bash
+    #   - -c
+    #   - dockerd & until docker run --rm hello-world; do echo "Waiting for docker";sleep 2; done;MESOS_HOSTNAME=$$(ip route | tail -n 1 | cut -d ' ' -f 12) mesos-slave --launcher=posix
+    entrypoint:
+      - sh
+      - -c
+      - service docker start;until docker run --rm hello-world; do echo "Waiting for docker";sleep 2; done;MESOS_HOSTNAME=$$(ip route | tail -n 1 | cut -d ' ' -f 12) mesos-slave
     environment:
-      MESOS_MASTER: zk://${DOCKER_IP}:2188/mesos
+      MESOS_MASTER: zk://zk:2188/mesos
       MESOS_CONTAINERIZERS: docker
-      MESOS_PORT: 5051
-      MESOS_RESOURCES: ports(*):[11000-11199]
-      MESOS_HOSTNAME: ${DOCKER_IP}
-      MESOS_ADVERTISE_IP: ${DOCKER_IP}
+      MESOS_RESOURCES: cpus(*):2;mem(*):1000
       MESOS_WORK_DIR: /tmp/mesos
-      MESOS_NO_STRICT: "true"
-    volumes:
-      - /sys/fs/cgroup:/sys/fs/cgroup
-      - /usr/local/bin/docker:/usr/bin/docker
-      - /var/run/docker.sock:/var/run/docker.sock
-    depends_on:
-      - zk
-
-  slave-two:
-    image: mesosphere/mesos-slave:1.2.1
-    network_mode: host
-    pid: host
-    userns_mode: host
-    privileged: true
-    environment:
-      MESOS_MASTER: zk://${DOCKER_IP}:2188/mesos
-      MESOS_CONTAINERIZERS: docker
-      MESOS_PORT: 5052
-      MESOS_RESOURCES: ports(*):[11200-11499]
-      MESOS_HOSTNAME: ${DOCKER_IP}
-      MESOS_ADVERTISE_IP: ${DOCKER_IP}
-      MESOS_WORK_DIR: /tmp/mesos
-      MESOS_NO_STRICT: "true"
-    volumes:
-      - /sys/fs/cgroup:/sys/fs/cgroup
-      - /usr/local/bin/docker:/usr/bin/docker
-      - /var/run/docker.sock:/var/run/docker.sock
     depends_on:
       - zk
 
   marathon:
-    image: mesosphere/marathon:v1.3.10
+    image: mesosphere/marathon:${MARATHON_VERSION-v1.3.10}
     entrypoint:
-      - ./bin/start
-      - --disable_ha
-      - --http_port
-      - "8080"
-    network_mode: host
-    pid: host
-    userns_mode: host
-    privileged: true
+      - sh 
+      - -c
+      - ./bin/start --disable_ha --http_port "8080" --hostname "$$(ip route | tail -n 1 | cut -d ' ' -f 12)"
     depends_on:
       - zk
-      - master
-      - slave-one
-      - slave-two
     environment:
-      - MARATHON_ZK=zk://${DOCKER_IP}:2188/marathon
-      - MARATHON_MASTER=zk://${DOCKER_IP}:2188/mesos
-      - LIBPROCESS_IP=${DOCKER_IP}
+      - MARATHON_ZK=zk://zk:2188/marathon
+      - MARATHON_MASTER=zk://zk:2188/mesos

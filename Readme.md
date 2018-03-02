@@ -1,21 +1,21 @@
-# mesos-actor
+# Actor library for Apache Mesos.
 
-A lightweight Mesos meta-framework for assembling Mesos Frameworks (schedulers). 
+A lightweight meta-framework for assembling Apache Mesos Frameworks (schedulers). 
 Based on:
 * Akka
 * Akka Streams
 * Akka HTTP
 * Akka Clustering
-* Mesos scheduler HTTP API [http://mesos.apache.org/documentation/latest/scheduler-http-api/]
+* Apache Mesos scheduler HTTP API [http://mesos.apache.org/documentation/latest/scheduler-http-api/]
 
 
 # Example
 
 See [SampleFramework.scala](./src/main/scala/com/adobe/api/platform/runtime/mesos/sample/SampleFramework.scala) for an example framework that:
-* initiates the Mesos Client subscription
+* initiates the Apache Mesos Client subscription
 * submits some tasks for execution
 * kills the tasks after some time
-* shuts down the Mesos Client on application termination 
+* shuts down the Apache Mesos Client on application termination 
 
 # Usage
 
@@ -91,9 +91,9 @@ See [SampleHAFramework.scala](./src/main/scala/com/adobe/api/platform/runtime/me
 $ make all
 ```
 
-This command builds the sample and a docker image that can be deployed in Mesos via Marathon.
+This command builds the sample and a docker image that can be deployed in Apache Mesos via Marathon.
  
-### Start a Mesos Cluster
+### Start an Apache Mesos Cluster
 
 ```bash
 $ DOCKER_IP=192.168.99.100 docker-compose up 
@@ -111,7 +111,7 @@ Browse to:
 $ curl http://192.168.99.100:8080/v2/apps/ --data @./marathon-config/marathon-app-local.json -H "Content-type: application/json"
 ```
 
-After a short while the Mesos UI should display a few tasks running, and a new framework should be registered.   
+After a short while the Apache Mesos UI should display a few tasks running, and a new framework should be registered.   
 
 ### Testing HA
 
@@ -122,5 +122,5 @@ $ curl -X POST http://192.168.99.100:8080/v2/apps/akka-cluster/restart
 ```
 
 Marathon should start new instances, wait until they become healthy, and then destroy the previous ones. 
-When the previous leader is destroyed, the framework should show as `inactive` in Mesos. 
+When the previous leader is destroyed, the framework should show as `inactive` in Apache Mesos. 
 Once a new leader is selected, the framework should then show back as `active`.  
