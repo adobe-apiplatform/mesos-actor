@@ -62,11 +62,10 @@ object SampleHAFramework {
   val taskDeleteTimeout = Timeout(10 seconds)
 
   def nextName() = {
-    taskCount+=1
+    taskCount += 1
     s"sample-task-${Instant.now.getEpochSecond}-${taskCount}"
   }
   def nextId() = "sample-task-" + UUID.randomUUID()
-
 
   // Create an Akka system
   val config: Config = ConfigFactory.load()
@@ -76,7 +75,7 @@ object SampleHAFramework {
   implicit val ec = system.dispatcher
   implicit val log = system.log
   implicit val cluster = Cluster(system)
-  val replicator:ActorRef = DistributedData(system).replicator
+  val replicator: ActorRef = DistributedData(system).replicator
 
   var frameworkId: Option[String] = None
   def main(args: Array[String]): Unit = {
@@ -86,9 +85,7 @@ object SampleHAFramework {
     val teardownTimeout = Timeout(5 seconds)
     System.out.println(config.toString)
 
-
     System.out.println(s"Starting a cluster named: ${clusterName}")
-
 
     // Create an actor that handles cluster domain events
     val frameworkActor = system.actorOf(Props(SimpleClusterListener), name = "clusterListener")
@@ -101,10 +98,10 @@ object SampleHAFramework {
     //create task store
     val tasks = new DistributedDataTaskStore(system)
 
-
     //create the singleton MesosClient actor
     system.actorOf(
-      ClusterSingletonManager.props(MesosClient.props(
+      ClusterSingletonManager.props(
+        MesosClient.props(
           () => frameworkId.getOrElse("sample-" + UUID.randomUUID()),
           "sample-framework",
           "http://192.168.99.100:5050",
@@ -116,74 +113,71 @@ object SampleHAFramework {
         settings = ClusterSingletonManagerSettings(system)),
       name = "mesosClientMaster")
     val mesosClientActor = system.actorOf(
-      ClusterSingletonProxy.props(
-        singletonManagerPath = "/user/mesosClientMaster",
-        settings = ClusterSingletonProxySettings(system)
-      ),
-      name = "mesosClientProxy"
-    )
-
+      ClusterSingletonProxy
+        .props(singletonManagerPath = "/user/mesosClientMaster", settings = ClusterSingletonProxySettings(system)),
+      name = "mesosClientProxy")
 
     //TODO: wait for subscription completion; make subscription
     log.info("waiting for subscription to complete")
-    mesosClientActor.ask(Subscribe).mapTo[SubscribeComplete].map(c => {
-      log.info("subscribe completed successfully...")
-      frameworkId = Some(c.id)
-      var taskCount = 0
-      def nextName() = {
-        taskCount+=1
-        s"cluster-task-${cluster.selfUniqueAddress}-${taskCount}"
-      }
-
-
-      def nextId() = "sample-task-" + UUID.randomUUID()
-
-      val launches = Future.sequence((1 to 2).map(_ => {
-        val taskId = nextId()
-        log.info(s"launching task id ${taskId}")
-        val task = TaskDef(taskId, nextName(),  "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
-        val launched: Future[TaskState] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskState]
-        launched map {
-          case taskDetails:Running => {
-            val taskHost = taskDetails.hostname
-            val taskPorts = taskDetails.hostports
-            log.info(s"launched task id ${taskDetails.taskId} with state ${taskDetails.taskStatus.getState} on agent ${taskHost} listening on ports ${taskPorts}")
-
-
-          }
-          case s => log.error(s"failed to launch task; state is ${s}")
-        } recover {
-          case t => log.error(s"task launch failed ${t.getMessage}", t)
+    mesosClientActor
+      .ask(Subscribe)
+      .mapTo[SubscribeComplete]
+      .map(c => {
+        log.info("subscribe completed successfully...")
+        frameworkId = Some(c.id)
+        var taskCount = 0
+        def nextName() = {
+          taskCount += 1
+          s"cluster-task-${cluster.selfUniqueAddress}-${taskCount}"
         }
-        launched
-      }))
 
-      //after we launch some tasks, wait around for 60s - during this time, you can cause a failover (kill the framework leader), and another node will become leader
-      //whichever node is the leader will enumerate the running tasks and kill them, assuming reconciliation went fine.
-      launches.onComplete(f => {
-        //schedule delete in 30 seconds, for ALL tasks
-        system.scheduler.scheduleOnce(60.seconds) {
-          if (tasks.isEmpty){
-            log.info("this cluster is not the framework - tasks will be killed by the framework node")
-          } else {
-            tasks.foreach( t => {
-              log.info(s"removing previously created task ${t._1}")
-              mesosClientActor.ask(DeleteTask(t._1))(taskDeleteTimeout).mapTo[Deleted].map(deleted => {
-                log.info(s"task killed ended with state ${deleted.taskStatus.getState}")
+        def nextId() = "sample-task-" + UUID.randomUUID()
+
+        val launches = Future.sequence((1 to 2).map(_ => {
+          val taskId = nextId()
+          log.info(s"launching task id ${taskId}")
+          val task =
+            TaskDef(taskId, nextName(), "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
+          val launched: Future[TaskState] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskState]
+          launched map {
+            case taskDetails: Running => {
+              val taskHost = taskDetails.hostname
+              val taskPorts = taskDetails.hostports
+              log.info(
+                s"launched task id ${taskDetails.taskId} with state ${taskDetails.taskStatus.getState} on agent ${taskHost} listening on ports ${taskPorts}")
+
+            }
+            case s => log.error(s"failed to launch task; state is ${s}")
+          } recover {
+            case t => log.error(s"task launch failed ${t.getMessage}", t)
+          }
+          launched
+        }))
+
+        //after we launch some tasks, wait around for 60s - during this time, you can cause a failover (kill the framework leader), and another node will become leader
+        //whichever node is the leader will enumerate the running tasks and kill them, assuming reconciliation went fine.
+        launches.onComplete(f => {
+          //schedule delete in 30 seconds, for ALL tasks
+          system.scheduler.scheduleOnce(60.seconds) {
+            if (tasks.isEmpty) {
+              log.info("this cluster is not the framework - tasks will be killed by the framework node")
+            } else {
+              tasks.foreach(t => {
+                log.info(s"removing previously created task ${t._1}")
+                mesosClientActor
+                  .ask(DeleteTask(t._1))(taskDeleteTimeout)
+                  .mapTo[Deleted]
+                  .map(deleted => {
+                    log.info(s"task killed ended with state ${deleted.taskStatus.getState}")
+                  })
+
               })
+            }
 
-            })
           }
+        })
 
-        }
       })
-
-    })
-
-
-
-
-
 
   }
 
@@ -201,21 +195,22 @@ object SampleHAFramework {
     cacheResult.map {
       case s: GetSuccess[_] => {
         s.dataValue match {
-        case data: LWWMap[_, _] => data.asInstanceOf[LWWMap[String, String]].get(key) match {
-        case Some(fwid) =>
-          log.info(s"returning cached fwid ${fwid}")
-          fwid
-        case None => {
-          val fwid = "sample-" + UUID.randomUUID()
-          log.info(s"found but none; returning new fwid ${fwid}")
-          fwid
-        }
-        }
-        case _ => {
-          val fwid = "sample-" + UUID.randomUUID()
-          log.info(s"found wrong data; returning new fwid ${fwid}")
-          fwid
-        }
+          case data: LWWMap[_, _] =>
+            data.asInstanceOf[LWWMap[String, String]].get(key) match {
+              case Some(fwid) =>
+                log.info(s"returning cached fwid ${fwid}")
+                fwid
+              case None => {
+                val fwid = "sample-" + UUID.randomUUID()
+                log.info(s"found but none; returning new fwid ${fwid}")
+                fwid
+              }
+            }
+          case _ => {
+            val fwid = "sample-" + UUID.randomUUID()
+            log.info(s"found wrong data; returning new fwid ${fwid}")
+            fwid
+          }
         }
       }
       case _ => {
@@ -229,7 +224,6 @@ object SampleHAFramework {
   }
 }
 
-
 private final case class Request(key: String)
 
 object SimpleClusterListener extends Actor with ActorLogging with Stash {
@@ -242,10 +236,7 @@ object SimpleClusterListener extends Actor with ActorLogging with Stash {
 
   // subscribe to cluster changes, re-subscribe when restart
   override def preStart(): Unit = {
-    cluster.subscribe(self,
-      classOf[MemberEvent],
-      classOf[UnreachableMember],
-      classOf[ClusterEvent.LeaderChanged])
+    cluster.subscribe(self, classOf[MemberEvent], classOf[UnreachableMember], classOf[ClusterEvent.LeaderChanged])
   }
   override def postStop(): Unit = cluster.unsubscribe(self)
 
@@ -259,8 +250,7 @@ object SimpleClusterListener extends Actor with ActorLogging with Stash {
       //TODO: verify down at marathon, then remove
       Cluster.get(context.system).down(member.address)
     case MemberRemoved(member, previousStatus) =>
-      log.info("Member is Removed: {} after {}",
-        member.address, previousStatus)
+      log.info("Member is Removed: {} after {}", member.address, previousStatus)
     case LeaderChanged(node) =>
       log.info("Leader changed to {}", node)
     case event: MemberEvent =>
@@ -268,6 +258,5 @@ object SimpleClusterListener extends Actor with ActorLogging with Stash {
     // ignore
 
   }
-
 
 }

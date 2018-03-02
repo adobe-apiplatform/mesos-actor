@@ -20,6 +20,8 @@ import org.apache.mesos.v1.scheduler.Protos.Call
 import scala.concurrent.Future
 
 trait MesosClientConnection {
-    def exec(call: Call): Future[HttpResponse]
-    def subscribe(frameworkID: FrameworkID, frameworkName: String, failoverTimeoutSecond: Double): Future[SubscribeComplete]
+  def exec(call: Call): Future[HttpResponse]
+  def subscribe(frameworkID: FrameworkID,
+                frameworkName: String,
+                failoverTimeoutSecond: Double): Future[SubscribeComplete]
 }

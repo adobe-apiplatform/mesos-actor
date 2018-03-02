@@ -21,5 +21,6 @@ import org.apache.mesos.v1.Protos.Resource
 import org.apache.mesos.v1.Protos.TaskInfo
 
 trait TaskBuilder {
-    def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(implicit logger:LoggingAdapter) : TaskInfo
+  def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(
+    implicit logger: LoggingAdapter): TaskInfo
 }

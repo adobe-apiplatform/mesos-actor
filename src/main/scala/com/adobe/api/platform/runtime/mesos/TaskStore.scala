@@ -56,10 +56,14 @@ trait TaskStore extends immutable.Map[String, TaskState] {
  */
 class LocalTaskStore extends TaskStore {
 
-  def reconcileData: Map[String, ReconcileTaskState] = tasks.collect({
-    case (_,Running(taskId,agentId,_,hostname,hostports)) => (taskId, ReconcileTaskState(agentId, hostname, hostports))
+  def reconcileData: Map[String, ReconcileTaskState] =
+    tasks
+      .collect({
+        case (_, Running(taskId, agentId, _, hostname, hostports)) =>
+          (taskId, ReconcileTaskState(agentId, hostname, hostports))
 
-  } ).toMap
+      })
+      .toMap
   override def update(taskId: String, taskState: TaskState): Unit = tasks.update(taskId, taskState)
 
   override def remove(taskId: String): Unit = tasks.remove(taskId)
@@ -79,14 +83,15 @@ class LocalTaskStore extends TaskStore {
  * @param as
  * @param cluster
  */
-class DistributedDataTaskStore(as: ActorSystem)(implicit cluster:Cluster) extends TaskStore {
+class DistributedDataTaskStore(as: ActorSystem)(implicit cluster: Cluster) extends TaskStore {
   private val cacheActor = as.actorOf(ReplicatedCache.props())
 
-  def reconcileData = Await.result((cacheActor ? GetReconcileData) (Timeout(5.seconds)).mapTo[Map[String, ReconcileTaskState]], 5.seconds)
+  def reconcileData =
+    Await.result((cacheActor ? GetReconcileData)(Timeout(5.seconds)).mapTo[Map[String, ReconcileTaskState]], 5.seconds)
 
   override def update(taskId: String, taskState: TaskState) = {
     //capture the current taskState for local usage
-    tasks+=(taskId -> taskState)
+    tasks += (taskId -> taskState)
     //if its Running, replicate the cache state for reconciliation needs
     taskState match {
       case Running(taskInfo, agentId, _, hostname, hostports) =>
@@ -98,7 +103,7 @@ class DistributedDataTaskStore(as: ActorSystem)(implicit cluster:Cluster) extend
 
   override def remove(id: String) = {
     //capture the current taskState for local usage
-    tasks-=(id)
+    tasks -= (id)
     //always replicate the cache state for removal
     cacheActor ! UnRegister(id)
   }
@@ -119,7 +124,9 @@ class DistributedDataTaskStore(as: ActorSystem)(implicit cluster:Cluster) extend
  * @param hostname
  * @param hostports
  */
-case class ReconcileTaskState(val agentId: String, val hostname: String, val hostports: Seq[Int]) extends ReplicatedData with Serializable {
+case class ReconcileTaskState(val agentId: String, val hostname: String, val hostports: Seq[Int])
+    extends ReplicatedData
+    with Serializable {
   override type T = this.type
   override def merge(that: ReconcileTaskState.this.type) =
     //no merging supported, just return this; we only have 1 writer at any time, so merging should not happen
@@ -136,7 +143,6 @@ private object ReplicatedCache {
   private val RecoveryDataKey = ORMapKey[TaskDataKey, ReconcileTaskState]("task-recovery-data")
   def props()(implicit cluster: Cluster) = Props(new ReplicatedCache())
 }
-
 
 private class ReplicatedCache()(implicit val cluster: Cluster) extends Actor with ActorLogging {
   val replicator = DistributedData(context.system).replicator
@@ -155,9 +161,15 @@ private class ReplicatedCache()(implicit val cluster: Cluster) extends Actor wit
     case GetReconcileData =>
       sender() ! cachedData
     case Register(taskId, taskState) =>
-      replicator ! Replicator.Update(ReplicatedCache.RecoveryDataKey, ORMap.empty[TaskDataKey, ReconcileTaskState], Replicator.WriteLocal)(_ + (taskDataKey(taskId), taskState))
+      replicator ! Replicator.Update(
+        ReplicatedCache.RecoveryDataKey,
+        ORMap.empty[TaskDataKey, ReconcileTaskState],
+        Replicator.WriteLocal)(_ + (taskDataKey(taskId), taskState))
     case UnRegister(taskId) =>
-      replicator ! Replicator.Update(ReplicatedCache.RecoveryDataKey, ORMap.empty[TaskDataKey, ReconcileTaskState], Replicator.WriteLocal)(_ - taskDataKey(taskId))
+      replicator ! Replicator.Update(
+        ReplicatedCache.RecoveryDataKey,
+        ORMap.empty[TaskDataKey, ReconcileTaskState],
+        Replicator.WriteLocal)(_ - taskDataKey(taskId))
     case c @ Replicator.Changed(ReplicatedCache.RecoveryDataKey) =>
       cachedData = c.get(ReplicatedCache.RecoveryDataKey).entries.map(e => (e._1.id -> e._2))
       log.debug(s"new cache data value ${cachedData}")

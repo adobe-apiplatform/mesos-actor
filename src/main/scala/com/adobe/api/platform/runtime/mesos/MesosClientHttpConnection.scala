@@ -50,88 +50,90 @@ import scala.util.Failure
 import scala.util.Success
 
 trait MesosClientHttpConnection extends MesosClientConnection {
-    this: MesosClientActor =>
-    implicit val materializer:ActorMaterializer = ActorMaterializer()
+  this: MesosClientActor =>
+  implicit val materializer: ActorMaterializer = ActorMaterializer()
 
-    val poolClientFlow = Http().cachedHostConnectionPool[Promise[HttpResponse]](host = mesosUri.getHost, port = mesosUri.getPort)
-    val queue =
-        Source.queue[(HttpRequest, Promise[HttpResponse])](100, OverflowStrategy.backpressure)
-                .via(poolClientFlow)
-                .toMat(Sink.foreach({
-                  case ((Success(resp), p)) => p.success(resp)
-                  case ((Failure(e), p))    => p.failure(e)
-                }))(Keep.left)
-                .run()
+  val poolClientFlow =
+    Http().cachedHostConnectionPool[Promise[HttpResponse]](host = mesosUri.getHost, port = mesosUri.getPort)
+  val queue =
+    Source
+      .queue[(HttpRequest, Promise[HttpResponse])](100, OverflowStrategy.backpressure)
+      .via(poolClientFlow)
+      .toMat(Sink.foreach({
+        case ((Success(resp), p)) => p.success(resp)
+        case ((Failure(e), p))    => p.failure(e)
+      }))(Keep.left)
+      .run()
 
-    def exec(call: Call): Future[HttpResponse] = {
-        log.info(s"sending ${call.getType}")
-        val req = Post("/api/v1/scheduler")
-                .withHeaders(
-                    RawHeader("Mesos-Stream-Id", streamId))
-                .withEntity(protobufContentType, call.toByteArray)
-        val responsePromise = Promise[HttpResponse]()
-        queue.offer(req, responsePromise)
-        responsePromise.future
-    }
+  def exec(call: Call): Future[HttpResponse] = {
+    log.info(s"sending ${call.getType}")
+    val req = Post("/api/v1/scheduler")
+      .withHeaders(RawHeader("Mesos-Stream-Id", streamId))
+      .withEntity(protobufContentType, call.toByteArray)
+    val responsePromise = Promise[HttpResponse]()
+    queue.offer(req, responsePromise)
+    responsePromise.future
+  }
 
+  def subscribe(frameworkID: FrameworkID,
+                frameworkName: String,
+                failoverTimeoutSecond: Double): Future[SubscribeComplete] = {
 
-    def subscribe(frameworkID: FrameworkID, frameworkName: String, failoverTimeoutSecond: Double): Future[SubscribeComplete] = {
+    import EventStreamUnmarshalling._
 
-        import EventStreamUnmarshalling._
+    val result = Promise[SubscribeComplete]
 
-        val result = Promise[SubscribeComplete]
+    val subscribeCall = Call
+      .newBuilder()
+      .setType(Call.Type.SUBSCRIBE)
+      .setFrameworkId(frameworkID)
+      .setSubscribe(
+        Call.Subscribe.newBuilder
+          .setFrameworkInfo(
+            FrameworkInfo.newBuilder
+              .setId(frameworkID)
+              .setUser(Optional.ofNullable(System.getenv("user")).orElse("root")) // https://issues.apache.org/jira/browse/MESOS-3747
+              .setName(frameworkName)
+              .setFailoverTimeout(failoverTimeoutSeconds.toSeconds)
+              .setRole(role)
+              .build)
+          .build())
+      .build()
+    logger.info(s"sending SUBSCRIBE to ${mesosUri}")
+    //TODO: handle connection failures: http://doc.akka.io/docs/akka-http/10.0.5/scala/http/low-level-server-side-api.html
+    //see https://gist.github.com/ktoso/4dda7752bf6f4393d1ac
+    //see https://tech.zalando.com/blog/about-akka-streams/?gh_src=4n3gxh1
+    Http()
+      .singleRequest(
+        Post(s"${mesosUri}/subscribe")
+          .withHeaders(RawHeader("Accept", "application/x-protobuf"), RawHeader("Connection", "close"))
+          .withEntity(protobufContentType, subscribeCall.toByteArray))
+      .flatMap(response => {
+        if (response.status.isSuccess()) {
+          logger.debug(s"response: ${response} ")
+          val newStreamId = response.getHeader("Mesos-Stream-Id").get().value()
+          if (streamId == null) {
+            logger.info(s"setting new streamId ${newStreamId}")
+            streamId = newStreamId
+            result.success(SubscribeComplete(frameworkID.getValue))
+          } else if (streamId != newStreamId) {
+            //TODO: do we need to handle StreamId changes?
+            logger.warning(s"streamId has changed! ${streamId}  ${newStreamId}")
+          }
+          Unmarshal(response).to[Source[Event, NotUsed]]
+        } else {
+          //TODO: reconnect?
+          throw new Exception(s"subscribe response failed: ${response}")
+        }
+      })
+      .foreach(eventSource => {
+        eventSource.runForeach(event => {
+          handleEvent(event)
+        })
+      })
 
-        val subscribeCall = Call.newBuilder()
-                .setType(Call.Type.SUBSCRIBE)
-                .setFrameworkId(frameworkID)
-                .setSubscribe(Call.Subscribe.newBuilder
-                        .setFrameworkInfo(FrameworkInfo.newBuilder
-                                .setId(frameworkID)
-                                .setUser(Optional.ofNullable(System.getenv("user")).orElse("root")) // https://issues.apache.org/jira/browse/MESOS-3747
-                                .setName(frameworkName)
-                                 .setFailoverTimeout(failoverTimeoutSeconds.toSeconds)
-                                .setRole(role)
-                                .build)
-                        .build())
-                .build()
-        logger.info(s"sending SUBSCRIBE to ${mesosUri}")
-        //TODO: handle connection failures: http://doc.akka.io/docs/akka-http/10.0.5/scala/http/low-level-server-side-api.html
-        //see https://gist.github.com/ktoso/4dda7752bf6f4393d1ac
-        //see https://tech.zalando.com/blog/about-akka-streams/?gh_src=4n3gxh1
-        Http()
-                .singleRequest(Post(s"${mesosUri}/subscribe")
-                        .withHeaders(RawHeader("Accept", "application/x-protobuf"),
-                            RawHeader("Connection", "close"))
-                        .withEntity(protobufContentType, subscribeCall.toByteArray))
-                .flatMap(response => {
-                    if (response.status.isSuccess()) {
-                        logger.debug(s"response: ${response} ")
-                        val newStreamId = response.getHeader("Mesos-Stream-Id").get().value()
-                        if (streamId == null) {
-                            logger.info(s"setting new streamId ${newStreamId}")
-                            streamId = newStreamId
-                            result.success(SubscribeComplete(frameworkID.getValue))
-                        } else if (streamId != newStreamId) {
-                            //TODO: do we need to handle StreamId changes?
-                            logger.warning(s"streamId has changed! ${streamId}  ${newStreamId}")
-                        }
-                        Unmarshal(response).to[Source[Event, NotUsed]]
-                    } else {
-                        //TODO: reconnect?
-                        throw new Exception(s"subscribe response failed: ${response}")
-                    }
-                })
-
-                .foreach(eventSource => {
-                    eventSource.runForeach(event => {
-                        handleEvent(event)
-                    })
-                })
-
-
-
-        result.future
-    }
+    result.future
+  }
 }
 
 //see https://github.com/hseeberger/akka-sse
@@ -139,39 +141,38 @@ object EventStreamUnmarshalling extends EventStreamUnmarshalling
 
 trait EventStreamUnmarshalling {
 
-    implicit final val fromEventStream: FromEntityUnmarshaller[Source[Event, NotUsed]] = {
-        val eventParser = new ServerSentEventParser()
+  implicit final val fromEventStream: FromEntityUnmarshaller[Source[Event, NotUsed]] = {
+    val eventParser = new ServerSentEventParser()
 
-        def unmarshal(entity: HttpEntity) =
+    def unmarshal(entity: HttpEntity) =
+      entity.withoutSizeLimit.dataBytes
+        .via(RecordIOFraming.scanner())
+        .via(eventParser)
+        .mapMaterializedValue(_ => NotUsed: NotUsed)
 
-            entity.withoutSizeLimit.dataBytes
-                    .via(RecordIOFraming.scanner())
-                    .via(eventParser)
-                    .mapMaterializedValue(_ => NotUsed: NotUsed)
-
-        Unmarshaller.strict(unmarshal).forContentTypes(protobufContentType)
-    }
+    Unmarshaller.strict(unmarshal).forContentTypes(protobufContentType)
+  }
 }
 
 private final class ServerSentEventParser() extends GraphStage[FlowShape[ByteString, Event]] {
 
-    override val shape =
-        FlowShape(Inlet[ByteString]("ServerSentEventParser.in"), Outlet[Event]("ServerSentEventParser.out"))
+  override val shape =
+    FlowShape(Inlet[ByteString]("ServerSentEventParser.in"), Outlet[Event]("ServerSentEventParser.out"))
 
-    override def createLogic(attributes: Attributes) =
-        new GraphStageLogic(shape) with InHandler with OutHandler {
+  override def createLogic(attributes: Attributes) =
+    new GraphStageLogic(shape) with InHandler with OutHandler {
 
-            import shape._
+      import shape._
 
-            setHandlers(in, out, this)
+      setHandlers(in, out, this)
 
-            override def onPush() = {
-                val line: ByteString = grab(in)
-                //unmarshall proto
-                val event = Event.parseFrom(line.toArray)
-                push(out, event)
-            }
+      override def onPush() = {
+        val line: ByteString = grab(in)
+        //unmarshall proto
+        val event = Event.parseFrom(line.toArray)
+        push(out, event)
+      }
 
-            override def onPull() = pull(in)
-        }
+      override def onPull() = pull(in)
+    }
 }

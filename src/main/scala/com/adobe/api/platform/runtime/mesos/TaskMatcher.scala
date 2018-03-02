@@ -20,6 +20,6 @@ import org.apache.mesos.v1.Protos.OfferID
 import org.apache.mesos.v1.Protos.TaskInfo
 
 trait TaskMatcher {
-    def matchTasksToOffers(role: String, t: Iterable[TaskDef], o: Iterable[Offer], builder: TaskBuilder)(implicit logger:LoggingAdapter): Map[OfferID, Seq[(TaskInfo, Seq[Int])]]
+  def matchTasksToOffers(role: String, t: Iterable[TaskDef], o: Iterable[Offer], builder: TaskBuilder)(
+    implicit logger: LoggingAdapter): Map[OfferID, Seq[(TaskInfo, Seq[Int])]]
 }
-

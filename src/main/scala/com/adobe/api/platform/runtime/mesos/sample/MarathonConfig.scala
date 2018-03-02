@@ -21,16 +21,16 @@ import com.typesafe.config._
 import collection.JavaConverters._
 
 /**
-  * This object discovers seed nodes for the Akka Cluster using Marathon API
-  */
+ * This object discovers seed nodes for the Akka Cluster using Marathon API
+ */
 object MarathonConfig {
 
   /**
-    * Use Marathon API to discover other running tasks for this app.
-    *
-    * A task  may come as:
-    *
-    * {
+   * Use Marathon API to discover other running tasks for this app.
+   *
+   * A task  may come as:
+   *
+   * {
           id: "akka-cluster.086db21b-7192-11e7-8203-0242ac107905",
           slaveId: "35f9af86-f5b0-4e95-a2b1-5f201b10fbaa-S0",
           host: "localhost",
@@ -49,21 +49,20 @@ object MarathonConfig {
           ],
           appId: "/akka-cluster"
       }
-    * This method extracts the host and the port of each task
-    *
-    * @return an array of strings with akka.tcp://{cluster-name}@{IP}:{PORT}
-    */
-  def getSeedNodes(config:Config): Seq[Address] = {
+   * This method extracts the host and the port of each task
+   *
+   * @return an array of strings with akka.tcp://{cluster-name}@{IP}:{PORT}
+   */
+  def getSeedNodes(config: Config): Seq[Address] = {
     val url: String = config.getString("akka.cluster.discovery.url")
     val portIndex: Int = config.getInt("akka.cluster.discovery.port-index")
     val clusterName: String = config.getString("akka.cluster.name")
 
-    var tmpCfg : Config = null
+    var tmpCfg: Config = null
 
     if (url.startsWith("http")) {
       tmpCfg = ConfigFactory
-        .parseURL(new URL(url),
-          ConfigParseOptions.defaults().setSyntax(ConfigSyntax.JSON))
+        .parseURL(new URL(url), ConfigParseOptions.defaults().setSyntax(ConfigSyntax.JSON))
         .resolve()
     } else {
       tmpCfg = ConfigFactory
@@ -79,8 +78,7 @@ object MarathonConfig {
       Thread.sleep(5000)
       if (url.startsWith("http")) {
         tmpCfg = ConfigFactory
-          .parseURL(new URL(url),
-            ConfigParseOptions.defaults().setSyntax(ConfigSyntax.JSON))
+          .parseURL(new URL(url), ConfigParseOptions.defaults().setSyntax(ConfigSyntax.JSON))
           .resolve()
       } else {
         tmpCfg = ConfigFactory
@@ -93,8 +91,10 @@ object MarathonConfig {
     System.out.println(s"can start cluster now that all ${tmpCfg.getConfigList("tasks").size()} tasks are healthy")
 
     var seq: Seq[Address] = Seq()
-    tmpCfg.getConfigList("tasks").asScala.foreach(
-      (item: Config) =>
+    tmpCfg
+      .getConfigList("tasks")
+      .asScala
+      .foreach((item: Config) =>
         seq = seq :+ Address("akka.tcp", clusterName, item.getString("host"), item.getIntList("ports").get(portIndex)))
     //for testing, case the first task to commit suicide
     //    if (tmpCfg.getConfigList("tasks").get(0).getString("id") == System.getenv("MESOS_TASK_ID")){
@@ -105,6 +105,15 @@ object MarathonConfig {
 
     seq
   }
-  private def unhealthyTasks(tmpCfg:Config) = tmpCfg.getConfigList("tasks").asScala.filter( t => t.hasPath("healthCheckResults") == false || t.getConfigList("healthCheckResults").get(0).getBoolean("alive") == false)
+  private def unhealthyTasks(tmpCfg: Config) =
+    tmpCfg
+      .getConfigList("tasks")
+      .asScala
+      .filter(
+        t =>
+          t.hasPath("healthCheckResults") == false || t
+            .getConfigList("healthCheckResults")
+            .get(0)
+            .getBoolean("alive") == false)
 
 }
