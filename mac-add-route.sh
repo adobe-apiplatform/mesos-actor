@@ -3,9 +3,8 @@ set -euo pipefail
 addOrDelete=${1:-add}
 
 MACHINE_NAME=${2:-default}
-gateway=$(docker-machine ip $MACHINE_NAME)
 
-gateway=$(docker-machine ip)
+gateway=$(docker-machine ip $MACHINE_NAME)
 networkname=$(echo $(basename $(pwd)) | tr -d '[:punct:]')_default
 subnet=$(docker network inspect mesosactor_default -f '{{(index .IPAM.Config 0).Subnet}}')
 
