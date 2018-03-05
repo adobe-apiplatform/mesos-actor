@@ -3,12 +3,14 @@ version: "3"
 services:
   zk:
     image: zookeeper:3.4
+    network_mode: bridge
     environment:
       ZOO_MY_ID: 1
       ZOO_PORT: 2188
 
   master:
     image: mesosphere/mesos-master:${MESOS_VERSION-1.2.1}
+    network_mode: bridge
     entrypoint:
       - sh
       - -c
@@ -17,11 +19,12 @@ services:
       MESOS_ZK: zk://zk:2188/mesos
       MESOS_QUORUM: 3
       MESOS_CLUSTER: docker-compose
-    depends_on:
+    links:
       - zk
 
   slave:
     image: mesosphere/mesos-slave:${MESOS_VERSION-1.2.1}
+    network_mode: bridge
     privileged: true
 # See:  https://issues.apache.org/jira/browse/MESOS-3793
     # entrypoint:
@@ -37,16 +40,17 @@ services:
       MESOS_CONTAINERIZERS: docker
       MESOS_RESOURCES: cpus(*):2;mem(*):1000
       MESOS_WORK_DIR: /tmp/mesos
-    depends_on:
+    links:
       - zk
 
   marathon:
     image: mesosphere/marathon:${MARATHON_VERSION-v1.3.10}
+    network_mode: bridge
     entrypoint:
       - sh 
       - -c
       - ./bin/start --disable_ha --http_port "8080" --hostname "$$(ip route | tail -n 1 | cut -d ' ' -f 12)"
-    depends_on:
+    links:
       - zk
     environment:
       - MARATHON_ZK=zk://zk:2188/marathon
