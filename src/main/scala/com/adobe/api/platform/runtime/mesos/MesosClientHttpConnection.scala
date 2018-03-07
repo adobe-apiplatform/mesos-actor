@@ -17,9 +17,12 @@ package com.adobe.api.platform.runtime.mesos
 import akka.NotUsed
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.client.RequestBuilding.Post
+import akka.http.scaladsl.model.ContentType
 import akka.http.scaladsl.model.HttpEntity
 import akka.http.scaladsl.model.HttpRequest
 import akka.http.scaladsl.model.HttpResponse
+import akka.http.scaladsl.model.MediaType
+import akka.http.scaladsl.model.MediaType.Compressible
 import akka.http.scaladsl.model.headers.RawHeader
 import akka.http.scaladsl.unmarshalling.FromEntityUnmarshaller
 import akka.http.scaladsl.unmarshalling.Unmarshal
@@ -49,6 +52,10 @@ import scala.concurrent.Promise
 import scala.util.Failure
 import scala.util.Success
 
+object MesosClientContentType {
+  val protobufContentType = ContentType(MediaType.applicationBinary("x-protobuf", Compressible, "proto"))
+}
+
 trait MesosClientHttpConnection extends MesosClientConnection {
   this: MesosClientActor =>
   implicit val materializer: ActorMaterializer = ActorMaterializer()
@@ -69,7 +76,7 @@ trait MesosClientHttpConnection extends MesosClientConnection {
     log.info(s"sending ${call.getType}")
     val req = Post("/api/v1/scheduler")
       .withHeaders(RawHeader("Mesos-Stream-Id", streamId))
-      .withEntity(protobufContentType, call.toByteArray)
+      .withEntity(MesosClientContentType.protobufContentType, call.toByteArray)
     val responsePromise = Promise[HttpResponse]()
     queue.offer(req, responsePromise)
     responsePromise.future
@@ -107,7 +114,7 @@ trait MesosClientHttpConnection extends MesosClientConnection {
       .singleRequest(
         Post(s"${mesosUri}/subscribe")
           .withHeaders(RawHeader("Accept", "application/x-protobuf"), RawHeader("Connection", "close"))
-          .withEntity(protobufContentType, subscribeCall.toByteArray))
+          .withEntity(MesosClientContentType.protobufContentType, subscribeCall.toByteArray))
       .flatMap(response => {
         if (response.status.isSuccess()) {
           logger.debug(s"response: ${response} ")
@@ -150,7 +157,7 @@ trait EventStreamUnmarshalling {
         .via(eventParser)
         .mapMaterializedValue(_ => NotUsed: NotUsed)
 
-    Unmarshaller.strict(unmarshal).forContentTypes(protobufContentType)
+    Unmarshaller.strict(unmarshal).forContentTypes(MesosClientContentType.protobufContentType)
   }
 }
 

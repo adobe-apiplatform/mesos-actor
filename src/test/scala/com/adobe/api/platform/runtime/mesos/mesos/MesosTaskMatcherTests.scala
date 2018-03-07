@@ -26,27 +26,77 @@ import scala.collection.JavaConverters._
 @RunWith(classOf[JUnitRunner])
 class MesosTaskMatcherTests extends FlatSpec with Matchers {
 
-    implicit val actorSystem:ActorSystem = ActorSystem("test-system")
-    implicit val logger:LoggingAdapter = actorSystem.log
+  implicit val actorSystem: ActorSystem = ActorSystem("test-system")
+  implicit val logger: LoggingAdapter = actorSystem.log
 
-    behavior of "Mesos Default TaskMatcher"
+  behavior of "Mesos Default TaskMatcher"
 
-    it should "only use a single slave per accept" in {
-        val offers = ProtobufUtil.getOffers("/offer1.json")
+  it should "only use a single slave per accept" in {
+    val offers = ProtobufUtil.getOffers("/offer1.json")
 
-        val tasks = List[TaskDef](TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(8080)))
-        val taskMap = DefaultTaskMatcher.matchTasksToOffers("*", tasks, offers.getOffersList.asScala, DefaultTaskBuilder)
+    val tasks = List[TaskDef](TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(8080)))
+    val taskMap =
+      DefaultTaskMatcher().matchTasksToOffers("*", tasks, offers.getOffersList.asScala, DefaultTaskBuilder())
 
-        taskMap.size shouldBe 1
+    taskMap.size shouldBe 1
 
-    }
-    it should "not use an offer if the number of required ports are not available" in {
-        val offers = ProtobufUtil.getOffers("/offer-noports.json")
+  }
+  it should "not use an offer if the number of required ports are not available" in {
+    val offers = ProtobufUtil.getOffers("/offer-noports.json")
 
-        val tasks = List[TaskDef](TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(8080)))
-        val taskMap = DefaultTaskMatcher.matchTasksToOffers("*", tasks, offers.getOffersList.asScala, DefaultTaskBuilder)
+    val tasks = List[TaskDef](TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(8080)))
+    val taskMap =
+      DefaultTaskMatcher().matchTasksToOffers("*", tasks, offers.getOffersList.asScala, DefaultTaskBuilder())
 
-        taskMap.size shouldBe 0
-    }
+    taskMap.size shouldBe 0
+  }
+  it should "only match an offer if contstraints match" in {
+    val offers = ProtobufUtil.getOffers("/offer1.json")
 
+    val tasks = List[TaskDef](
+      TaskDef(
+        "taskId",
+        "taskName",
+        "dockerImage:someTag",
+        0.1,
+        256,
+        List(8080),
+        constraints = Set(Constraint("a1", LIKE, "av1"), Constraint("a2", UNLIKE, "av2"))), //test missing attributes
+      TaskDef(
+        "taskId2",
+        "taskName",
+        "dockerImage:someTag",
+        0.1,
+        256,
+        List(8080),
+        constraints = Set(Constraint("att1", LIKE, "att1value.*"), Constraint("att2", UNLIKE, "notmatched"))), //test matching multiple constraints
+      TaskDef(
+        "taskId3",
+        "taskName",
+        "dockerImage:someTag",
+        0.1,
+        256,
+        List(8080),
+        constraints = Set(Constraint("att1", LIKE, "att1valueslave1"))), //test exact match
+      TaskDef(
+        "taskId4",
+        "taskName",
+        "dockerImage:someTag",
+        0.1,
+        256,
+        List(8080),
+        constraints = Set(Constraint("att2", UNLIKE, "att1value.*"))), //test UNLIKE matching the opposite
+      TaskDef(
+        "taskId5",
+        "taskName",
+        "dockerImage:someTag",
+        0.1,
+        256,
+        List(8080),
+        constraints = Set(Constraint("att2", LIKE, "(?!att1value).*")))) //test negative lookahead to match same as UNLIKE
+    val taskMap =
+      DefaultTaskMatcher().matchTasksToOffers("*", tasks, offers.getOffersList.asScala, DefaultTaskBuilder())
+    taskMap.values.flatten.map(_._1.getTaskId.getValue) shouldBe List("taskId2", "taskId3", "taskId4", "taskId5")
+
+  }
 }

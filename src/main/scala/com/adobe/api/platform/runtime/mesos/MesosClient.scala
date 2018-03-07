@@ -23,6 +23,7 @@ import akka.http.scaladsl.model.HttpResponse
 import akka.pattern.ask
 import akka.pattern.pipe
 import akka.util.Timeout
+import com.google.protobuf.util.JsonFormat
 import java.net.URI
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.ExecutorID
@@ -66,23 +67,30 @@ case object TeardownComplete
 
 case class TaskRecoveryDetail(taskId: String, agentId: String)
 
+//task data
 sealed trait Network
 case object Bridge extends Network
 case object Host extends Network
 case class User(name: String) extends Network
 
-//data
+sealed trait Operator
+case object LIKE extends Operator
+case object UNLIKE extends Operator
+
+case class Constraint(attribute: String, operator: Operator, value: String)
+
 case class TaskDef(taskId: String,
                    taskName: String,
                    dockerImage: String,
                    cpus: Double,
                    mem: Int,
-                   ports: Seq[Int] = List(),
+                   ports: Seq[Int] = Seq.empty,
                    healthCheckPortIndex: Option[Int] = None,
                    forcePull: Boolean = false,
                    network: Network = Bridge,
-                   dockerRunParameters: Map[String, Set[String]] = Map(),
-                   environment: Map[String, String] = Map())
+                   dockerRunParameters: Map[String, Set[String]] = Map.empty,
+                   environment: Map[String, String] = Map.empty,
+                   constraints: Set[Constraint] = Set.empty)
 
 //task states
 sealed abstract class TaskState()
@@ -495,6 +503,9 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
 
     }
   }
+  def toCompactJsonString(message: com.google.protobuf.Message) =
+    JsonFormat.printer.omittingInsignificantWhitespace.print(message)
+
 }
 
 class MesosClient(val id: () => String,
@@ -516,8 +527,8 @@ object MesosClient {
             master: String,
             role: String,
             failoverTimeoutSeconds: FiniteDuration,
-            taskMatcher: TaskMatcher = DefaultTaskMatcher,
-            taskBuilder: TaskBuilder = DefaultTaskBuilder,
+            taskMatcher: TaskMatcher = new DefaultTaskMatcher,
+            taskBuilder: TaskBuilder = new DefaultTaskBuilder,
             autoSubscribe: Boolean = false,
             taskStore: TaskStore): Props =
     Props(
