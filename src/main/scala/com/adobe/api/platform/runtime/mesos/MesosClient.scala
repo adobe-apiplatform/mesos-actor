@@ -84,6 +84,10 @@ case class TaskDef(taskId: String,
                    dockerRunParameters: Map[String, Set[String]] = Map(),
                    environment: Map[String, String] = Map())
 
+case class CommandDef(environment: Map[String, String] = Map(), uris:Seq[CommandURIDef] = List())
+
+case class CommandURIDef(uri:URI, extract:Boolean = true, cache:Boolean = false, executable:Boolean = false)
+
 //task states
 sealed abstract class TaskState()
 case class SubmitPending(reqs: TaskDef, promise: Promise[Running]) extends TaskState

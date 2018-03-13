@@ -168,7 +168,7 @@ package object mesos {
 
   object DefaultTaskBuilder extends TaskBuilder {
 
-    def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(
+    def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping], commandDef: CommandDef = null)(
       implicit logger: LoggingAdapter): TaskInfo = {
       val healthCheck = reqs.healthCheckPortIndex.map(
         i =>
@@ -183,6 +183,8 @@ package object mesos {
             .setTimeoutSeconds(1)
             .setGracePeriodSeconds(25)
             .build())
+
+      val realCommand = DefaultCommandBuilder.apply(if (commandDef == null) new CommandDef(reqs.environment) else commandDef)
 
       val environmentVars = reqs.environment
         .map(
@@ -219,13 +221,7 @@ package object mesos {
         .setTaskId(TaskID.newBuilder
           .setValue(reqs.taskId))
         .setAgentId(offer.getAgentId)
-        .setCommand(
-          CommandInfo.newBuilder
-            .setEnvironment(Protos.Environment.newBuilder
-              .addAllVariables(environmentVars)
-              .build())
-            .setShell(false)
-            .build())
+        .setCommand(realCommand)
         .setContainer(
           ContainerInfo.newBuilder
             .setType(ContainerInfo.Type.DOCKER)
@@ -244,6 +240,35 @@ package object mesos {
         case None     => //no health check
       }
       taskBuilder.build()
+    }
+  }
+
+  object DefaultCommandBuilder extends CommandBuilder {
+    override def apply(command: CommandDef): CommandInfo = {
+      CommandInfo
+        .newBuilder()
+        .setEnvironment(
+          Protos.Environment
+            .newBuilder()
+            .addAllVariables(command.environment.map {
+              case (key, value) =>
+                Protos.Environment.Variable.newBuilder
+                  .setName(key)
+                  .setValue(value)
+                  .build()
+            }.asJava))
+        .addAllUris(command.uris.map {
+          case (u: CommandURIDef) =>
+            Protos.CommandInfo.URI
+              .newBuilder()
+              .setCache(u.cache)
+              .setExecutable(u.executable)
+              .setExtract(u.extract)
+              .setValue(u.uri.toString)
+              .build()
+        }.asJava)
+        .setShell(false)
+        .build()
     }
   }
 
