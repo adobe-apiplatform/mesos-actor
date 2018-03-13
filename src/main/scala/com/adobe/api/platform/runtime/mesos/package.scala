@@ -184,16 +184,7 @@ package object mesos {
             .setGracePeriodSeconds(25)
             .build())
 
-      val realCommand = DefaultCommandBuilder.apply(if (commandDef == null) new CommandDef(reqs.environment) else commandDef)
-
-      val environmentVars = reqs.environment
-        .map(
-          e =>
-            Protos.Environment.Variable.newBuilder
-              .setName(e._1)
-              .setValue(e._2)
-              .build())
-        .asJava
+      val realCommand = DefaultCommandBuilder.apply(if (commandDef == null) new CommandDef() else commandDef)
 
       val parameters = reqs.dockerRunParameters.flatMap {
         case (k, v) =>

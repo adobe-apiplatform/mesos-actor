@@ -81,8 +81,7 @@ case class TaskDef(taskId: String,
                    healthCheckPortIndex: Option[Int] = None,
                    forcePull: Boolean = false,
                    network: Network = Bridge,
-                   dockerRunParameters: Map[String, Set[String]] = Map(),
-                   environment: Map[String, String] = Map())
+                   dockerRunParameters: Map[String, Set[String]] = Map(), commandDef: CommandDef = null)
 
 case class CommandDef(environment: Map[String, String] = Map(), uris:Seq[CommandURIDef] = List())
 
