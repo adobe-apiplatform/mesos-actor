@@ -31,8 +31,11 @@ import org.apache.mesos.v1.Protos.TaskInfo
 import scala.collection.JavaConverters._
 
 trait TaskBuilder {
-  def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(
-    implicit logger: LoggingAdapter): TaskInfo
+  def apply(reqs: TaskDef,
+            offer: Offer,
+            resources: Seq[Resource],
+            portMappings: Seq[PortMapping],
+            command: CommandDef = null)(implicit logger: LoggingAdapter): TaskInfo
 }
 
 object DefaultTaskBuilder {

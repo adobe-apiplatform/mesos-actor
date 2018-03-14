@@ -89,8 +89,12 @@ case class TaskDef(taskId: String,
                    forcePull: Boolean = false,
                    network: Network = Bridge,
                    dockerRunParameters: Map[String, Set[String]] = Map.empty,
-                   environment: Map[String, String] = Map.empty,
+                   commandDef: CommandDef = null,
                    constraints: Set[Constraint] = Set.empty)
+
+case class CommandDef(environment: Map[String, String] = Map(), uris: Seq[CommandURIDef] = List())
+
+case class CommandURIDef(uri: URI, extract: Boolean = true, cache: Boolean = false, executable: Boolean = false)
 
 //task states
 sealed abstract class TaskState()

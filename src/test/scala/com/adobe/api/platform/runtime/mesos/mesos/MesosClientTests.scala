@@ -23,19 +23,7 @@ import akka.pattern.ask
 import akka.testkit.ImplicitSender
 import akka.testkit.TestKit
 import akka.util.Timeout
-import com.adobe.api.platform.runtime.mesos.DefaultTaskBuilder
-import com.adobe.api.platform.runtime.mesos.DefaultTaskMatcher
-import com.adobe.api.platform.runtime.mesos.LocalTaskStore
-import com.adobe.api.platform.runtime.mesos.MesosClientActor
-import com.adobe.api.platform.runtime.mesos.MesosClientConnection
-import com.adobe.api.platform.runtime.mesos.Running
-import com.adobe.api.platform.runtime.mesos.SubmitTask
-import com.adobe.api.platform.runtime.mesos.Subscribe
-import com.adobe.api.platform.runtime.mesos.SubscribeComplete
-import com.adobe.api.platform.runtime.mesos.TaskBuilder
-import com.adobe.api.platform.runtime.mesos.TaskMatcher
-import com.adobe.api.platform.runtime.mesos.TaskDef
-import com.adobe.api.platform.runtime.mesos.TaskStore
+import com.adobe.api.platform.runtime.mesos._
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.Protos.TaskID
@@ -45,6 +33,7 @@ import org.apache.mesos.v1.scheduler.Protos.Call
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.Matchers
 import org.scalatest.WordSpecLike
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
@@ -111,8 +100,7 @@ class MesosClientTests
           256,
           List(8080),
           Some(0),
-          environment = Map("__OW_API_HOST" -> "192.168.99.100")))
-
+          commandDef = new CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100"))))
       //receive offers
       mesosClient ! ProtobufUtil.getOffers("/offer1.json")
 

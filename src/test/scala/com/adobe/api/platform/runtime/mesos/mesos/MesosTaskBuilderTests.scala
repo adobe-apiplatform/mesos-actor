@@ -16,6 +16,7 @@ package com.adobe.api.platform.runtime.mesos.mesos
 
 import akka.actor.ActorSystem
 import akka.event.LoggingAdapter
+import com.adobe.api.platform.runtime.mesos.CommandDef
 import com.adobe.api.platform.runtime.mesos.Constraint
 import com.adobe.api.platform.runtime.mesos.DefaultTaskBuilder
 import com.adobe.api.platform.runtime.mesos.LIKE
@@ -26,9 +27,12 @@ import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.Network
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.PortMapping
 import org.apache.mesos.v1.Protos.Resource
 import org.apache.mesos.v1.Protos.Value
+import org.junit.runner.RunWith
 import org.scalatest.FlatSpec
 import org.scalatest.Matchers
+import org.scalatest.junit.JUnitRunner
 
+@RunWith(classOf[JUnitRunner])
 class MesosTaskBuilderTests extends FlatSpec with Matchers {
   behavior of "Mesos Default TaskBuilder"
   implicit val actorSystem: ActorSystem = ActorSystem("test-system")
@@ -64,9 +68,9 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
       Some(0),
       true,
       User("usernet"),
-      parameters,
-      environment)
-    val taskInfo = DefaultTaskBuilder().apply(taskDef, offers.getOffers(0), resources, portMappings)
+      parameters)
+    val command = new CommandDef(environment = environment)
+    val taskInfo = new DefaultTaskBuilder().apply(taskDef, offers.getOffers(0), resources, portMappings, command)
 
     taskInfo.getTaskId.getValue shouldBe taskDef.taskId
     taskInfo.getName shouldBe taskDef.taskName
