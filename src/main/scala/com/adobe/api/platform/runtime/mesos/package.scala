@@ -168,7 +168,7 @@ package object mesos {
 
   object DefaultTaskBuilder extends TaskBuilder {
 
-    def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping], commandDef: CommandDef = null)(
+    def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping], commandDef: CommandDef = new CommandDef())(
       implicit logger: LoggingAdapter): TaskInfo = {
       val healthCheck = reqs.healthCheckPortIndex.map(
         i =>
@@ -184,7 +184,6 @@ package object mesos {
             .setGracePeriodSeconds(25)
             .build())
 
-      val realCommand = DefaultCommandBuilder.apply(if (commandDef == null) new CommandDef() else commandDef)
 
       val parameters = reqs.dockerRunParameters.flatMap {
         case (k, v) =>
@@ -212,7 +211,7 @@ package object mesos {
         .setTaskId(TaskID.newBuilder
           .setValue(reqs.taskId))
         .setAgentId(offer.getAgentId)
-        .setCommand(realCommand)
+        .setCommand(DefaultCommandBuilder.apply(commandDef))
         .setContainer(
           ContainerInfo.newBuilder
             .setType(ContainerInfo.Type.DOCKER)
@@ -249,7 +248,7 @@ package object mesos {
                   .build()
             }.asJava))
         .addAllUris(command.uris.map {
-          case (u: CommandURIDef) =>
+          u =>
             Protos.CommandInfo.URI
               .newBuilder()
               .setCache(u.cache)
