@@ -16,16 +16,17 @@ package com.adobe.api.platform.runtime.mesos.mesos
 
 import akka.actor.ActorSystem
 import akka.event.LoggingAdapter
-import com.adobe.api.platform.runtime.mesos.DefaultTaskBuilder
-import com.adobe.api.platform.runtime.mesos.TaskDef
-import com.adobe.api.platform.runtime.mesos.User
+import com.adobe.api.platform.runtime.mesos._
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.Network
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.PortMapping
 import org.apache.mesos.v1.Protos.Resource
 import org.apache.mesos.v1.Protos.Value
+import org.junit.runner.RunWith
 import org.scalatest.FlatSpec
 import org.scalatest.Matchers
+import org.scalatest.junit.JUnitRunner
 
+@RunWith(classOf[JUnitRunner])
 class MesosTaskBuilderTests extends FlatSpec with Matchers {
   behavior of "Mesos Default TaskBuilder"
   implicit val actorSystem:ActorSystem = ActorSystem("test-system")
@@ -44,8 +45,9 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
             .build())
     val parameters = Map("dns" -> Set("1.2.3.4", "8.8.8.8"), "cap-drop" -> Set("NET_RAW", "NET_ADMIN"), "ulimit" -> Set("nofile=1024:1024"))
     val environment = Map("VAR1" -> "VAL1", "VAR2" -> "VAL2")
-    val taskDef = TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(112233), Some(0), true, User("usernet"), parameters, environment)
-    val taskInfo = DefaultTaskBuilder.apply(taskDef, offers.getOffers(0), resources, portMappings)
+    val taskDef = TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(112233), Some(0), true, User("usernet"), parameters)
+    val command = new CommandDef(environment = environment)
+    val taskInfo = DefaultTaskBuilder.apply(taskDef, offers.getOffers(0), resources, portMappings, command)
 
 
     taskInfo.getTaskId.getValue shouldBe taskDef.taskId
@@ -71,9 +73,6 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
     taskInfo.getCommand.getEnvironment.getVariables(0).getValue shouldBe "VAL1"
     taskInfo.getCommand.getEnvironment.getVariables(1).getName shouldBe "VAR2"
     taskInfo.getCommand.getEnvironment.getVariables(1).getValue shouldBe "VAL2"
-
-
-
 
   }
 

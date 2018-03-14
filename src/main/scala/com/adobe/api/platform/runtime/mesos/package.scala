@@ -168,8 +168,11 @@ package object mesos {
 
   object DefaultTaskBuilder extends TaskBuilder {
 
-    def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(
-      implicit logger: LoggingAdapter): TaskInfo = {
+    def apply(reqs: TaskDef,
+              offer: Offer,
+              resources: Seq[Resource],
+              portMappings: Seq[PortMapping],
+              commandDef: CommandDef = new CommandDef())(implicit logger: LoggingAdapter): TaskInfo = {
       val healthCheck = reqs.healthCheckPortIndex.map(
         i =>
           HealthCheck
@@ -183,15 +186,6 @@ package object mesos {
             .setTimeoutSeconds(1)
             .setGracePeriodSeconds(25)
             .build())
-
-      val environmentVars = reqs.environment
-        .map(
-          e =>
-            Protos.Environment.Variable.newBuilder
-              .setName(e._1)
-              .setValue(e._2)
-              .build())
-        .asJava
 
       val parameters = reqs.dockerRunParameters.flatMap {
         case (k, v) =>
@@ -219,13 +213,7 @@ package object mesos {
         .setTaskId(TaskID.newBuilder
           .setValue(reqs.taskId))
         .setAgentId(offer.getAgentId)
-        .setCommand(
-          CommandInfo.newBuilder
-            .setEnvironment(Protos.Environment.newBuilder
-              .addAllVariables(environmentVars)
-              .build())
-            .setShell(false)
-            .build())
+        .setCommand(DefaultCommandBuilder.apply(commandDef))
         .setContainer(
           ContainerInfo.newBuilder
             .setType(ContainerInfo.Type.DOCKER)
@@ -244,6 +232,34 @@ package object mesos {
         case None     => //no health check
       }
       taskBuilder.build()
+    }
+  }
+
+  object DefaultCommandBuilder extends CommandBuilder {
+    override def apply(command: CommandDef): CommandInfo = {
+      CommandInfo
+        .newBuilder()
+        .setEnvironment(
+          Protos.Environment
+            .newBuilder()
+            .addAllVariables(command.environment.map {
+              case (key, value) =>
+                Protos.Environment.Variable.newBuilder
+                  .setName(key)
+                  .setValue(value)
+                  .build()
+            }.asJava))
+        .addAllUris(command.uris.map { u =>
+          Protos.CommandInfo.URI
+            .newBuilder()
+            .setCache(u.cache)
+            .setExecutable(u.executable)
+            .setExtract(u.extract)
+            .setValue(u.uri.toString)
+            .build()
+        }.asJava)
+        .setShell(false)
+        .build()
     }
   }
 
