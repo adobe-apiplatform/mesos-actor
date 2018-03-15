@@ -79,7 +79,7 @@ class DefaultTaskBuilder extends TaskBuilder {
           .build())
       .addAllResources(resources.asJava)
     reqs.commandDef.foreach(c => {
-      taskBuilder.setCommand(commandBuilder.apply(c))
+      taskBuilder.setCommand(commandBuilder(c))
     })
     reqs.healthCheckPortIndex.foreach(h => {
       taskBuilder.setHealthCheck(

@@ -32,7 +32,7 @@ class MesosCommandBuilderTests extends FlatSpec with Matchers {
   it should "set URIs on a Command Proto from CommandDef" in {
     val uris = 0.to(3).map((i: Int) => { new CommandURIDef(new URI(f"http://$i.com")) })
     val command = CommandDef(uris = uris)
-    val mesosCommandInfo = new DefaultCommandBuilder().apply(command)
+    val mesosCommandInfo = new DefaultCommandBuilder()(command)
 
     mesosCommandInfo.getUris(0).getValue shouldBe "http://0.com"
     mesosCommandInfo.getUris(1).getValue shouldBe "http://1.com"
@@ -48,7 +48,7 @@ class MesosCommandBuilderTests extends FlatSpec with Matchers {
       })
 
     val command = CommandDef(uris = uris)
-    val mesosCommandInfo = new DefaultCommandBuilder().apply(command)
+    val mesosCommandInfo = new DefaultCommandBuilder()(command)
 
     mesosCommandInfo.getUris(0).getExecutable shouldBe true
     mesosCommandInfo.getUris(0).getCache shouldBe true
@@ -60,7 +60,7 @@ class MesosCommandBuilderTests extends FlatSpec with Matchers {
     val environment = Map("VAR1" -> "VAL1", "VAR2" -> "VAL2")
 
     val command = CommandDef(environment = environment)
-    val mesosCommandInfo = new DefaultCommandBuilder().apply(command)
+    val mesosCommandInfo = new DefaultCommandBuilder()(command)
 
     mesosCommandInfo.getEnvironment.getVariables(0).getName shouldBe "VAR1"
     mesosCommandInfo.getEnvironment.getVariables(0).getValue shouldBe "VAL1"

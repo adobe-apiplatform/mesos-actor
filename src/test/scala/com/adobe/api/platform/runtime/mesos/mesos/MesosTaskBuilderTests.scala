@@ -67,7 +67,7 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
       User("usernet"),
       parameters,
       Some(CommandDef(environment = environment)))
-    val taskInfo = new DefaultTaskBuilder().apply(taskDef, offers.getOffers(0), resources, portMappings)
+    val taskInfo = new DefaultTaskBuilder()(taskDef, offers.getOffers(0), resources, portMappings)
 
     taskInfo.getTaskId.getValue shouldBe taskDef.taskId
     taskInfo.getName shouldBe taskDef.taskName
