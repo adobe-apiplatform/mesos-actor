@@ -89,10 +89,10 @@ case class TaskDef(taskId: String,
                    forcePull: Boolean = false,
                    network: Network = Bridge,
                    dockerRunParameters: Map[String, Set[String]] = Map.empty,
-                   commandDef: CommandDef = null,
+                   commandDef: Option[CommandDef] = None,
                    constraints: Set[Constraint] = Set.empty)
 
-case class CommandDef(environment: Map[String, String] = Map(), uris: Seq[CommandURIDef] = List())
+case class CommandDef(environment: Map[String, String] = Map.empty, uris: Seq[CommandURIDef] = Seq.empty)
 
 case class CommandURIDef(uri: URI, extract: Boolean = true, cache: Boolean = false, executable: Boolean = false)
 

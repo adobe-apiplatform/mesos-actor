@@ -29,9 +29,6 @@ trait TaskMatcher {
   def matchTasksToOffers(role: String, t: Iterable[TaskDef], o: Iterable[Offer], builder: TaskBuilder)(
     implicit logger: LoggingAdapter): Map[OfferID, Seq[(TaskInfo, Seq[Int])]]
 }
-object DefaultTaskMatcher {
-  def apply() = new DefaultTaskMatcher
-}
 class DefaultTaskMatcher extends TaskMatcher {
   override def matchTasksToOffers(role: String, t: Iterable[TaskDef], o: Iterable[Offer], builder: TaskBuilder)(
     implicit logger: LoggingAdapter): Map[OfferID, Seq[(TaskInfo, Seq[Int])]] = {

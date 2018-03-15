@@ -54,8 +54,8 @@ class MesosClientTests
     override val frameworkName: String = "testframework"
     override val master: String = "none"
     override val role: String = "*"
-    override val taskMatcher: TaskMatcher = DefaultTaskMatcher()
-    override val taskBuilder: TaskBuilder = DefaultTaskBuilder()
+    override val taskMatcher: TaskMatcher = new DefaultTaskMatcher()
+    override val taskBuilder: TaskBuilder = new DefaultTaskBuilder()
     override val failoverTimeoutSeconds = 0.seconds
     override val autoSubscribe: Boolean = false
     override val tasks: TaskStore = new LocalTaskStore
@@ -100,7 +100,7 @@ class MesosClientTests
           256,
           List(8080),
           Some(0),
-          commandDef = new CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100"))))
+          commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
       //receive offers
       mesosClient ! ProtobufUtil.getOffers("/offer1.json")
 

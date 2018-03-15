@@ -15,8 +15,6 @@
 package com.adobe.api.platform.runtime.mesos
 
 import akka.event.LoggingAdapter
-import org.apache.mesos.v1.Protos
-import org.apache.mesos.v1.Protos.CommandInfo
 import org.apache.mesos.v1.Protos.ContainerInfo
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.PortMapping
@@ -31,36 +29,15 @@ import org.apache.mesos.v1.Protos.TaskInfo
 import scala.collection.JavaConverters._
 
 trait TaskBuilder {
-  def apply(reqs: TaskDef,
-            offer: Offer,
-            resources: Seq[Resource],
-            portMappings: Seq[PortMapping],
-            command: CommandDef = null)(implicit logger: LoggingAdapter): TaskInfo
+  def commandBuilder: CommandBuilder
+  def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(
+    implicit logger: LoggingAdapter): TaskInfo
 }
 
-object DefaultTaskBuilder {
-  def apply() = new DefaultTaskBuilder
-}
 class DefaultTaskBuilder extends TaskBuilder {
-
-  def apply(reqs: TaskDef,
-            offer: Offer,
-            resources: Seq[Resource],
-            portMappings: Seq[PortMapping],
-            commandDef: CommandDef = new CommandDef())(implicit logger: LoggingAdapter): TaskInfo = {
-    val healthCheck = reqs.healthCheckPortIndex.map(
-      i =>
-        HealthCheck
-          .newBuilder()
-          .setType(HealthCheck.Type.TCP)
-          .setTcp(TCPCheckInfo
-            .newBuilder()
-            .setPort(reqs.ports(i)))
-          .setDelaySeconds(0)
-          .setIntervalSeconds(1)
-          .setTimeoutSeconds(1)
-          .setGracePeriodSeconds(25)
-          .build())
+  val commandBuilder = new DefaultCommandBuilder()
+  def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(
+    implicit logger: LoggingAdapter): TaskInfo = {
 
     val parameters = reqs.dockerRunParameters.flatMap {
       case (k, v) =>
@@ -88,7 +65,6 @@ class DefaultTaskBuilder extends TaskBuilder {
       .setTaskId(TaskID.newBuilder
         .setValue(reqs.taskId))
       .setAgentId(offer.getAgentId)
-      .setCommand(DefaultCommandBuilder.apply(commandDef))
       .setContainer(
         ContainerInfo.newBuilder
           .setType(ContainerInfo.Type.DOCKER)
@@ -102,37 +78,23 @@ class DefaultTaskBuilder extends TaskBuilder {
               .build())
           .build())
       .addAllResources(resources.asJava)
-    healthCheck match {
-      case Some(hc) => taskBuilder.setHealthCheck(hc)
-      case None     => //no health check
-    }
+    reqs.commandDef.foreach(c => {
+      taskBuilder.setCommand(commandBuilder.apply(c))
+    })
+    reqs.healthCheckPortIndex.foreach(h => {
+      taskBuilder.setHealthCheck(
+        HealthCheck
+          .newBuilder()
+          .setType(HealthCheck.Type.TCP)
+          .setTcp(TCPCheckInfo
+            .newBuilder()
+            .setPort(reqs.ports(h)))
+          .setDelaySeconds(0)
+          .setIntervalSeconds(1)
+          .setTimeoutSeconds(1)
+          .setGracePeriodSeconds(25)
+          .build())
+    })
     taskBuilder.build()
-  }
-}
-object DefaultCommandBuilder extends CommandBuilder {
-  override def apply(command: CommandDef): CommandInfo = {
-    CommandInfo
-      .newBuilder()
-      .setEnvironment(
-        Protos.Environment
-          .newBuilder()
-          .addAllVariables(command.environment.map {
-            case (key, value) =>
-              Protos.Environment.Variable.newBuilder
-                .setName(key)
-                .setValue(value)
-                .build()
-          }.asJava))
-      .addAllUris(command.uris.map { u =>
-        Protos.CommandInfo.URI
-          .newBuilder()
-          .setCache(u.cache)
-          .setExecutable(u.executable)
-          .setExtract(u.extract)
-          .setValue(u.uri.toString)
-          .build()
-      }.asJava)
-      .setShell(false)
-      .build()
   }
 }

@@ -17,11 +17,8 @@ package com.adobe.api.platform.runtime.mesos.mesos
 import akka.actor.ActorSystem
 import akka.event.LoggingAdapter
 import com.adobe.api.platform.runtime.mesos.CommandDef
-import com.adobe.api.platform.runtime.mesos.Constraint
 import com.adobe.api.platform.runtime.mesos.DefaultTaskBuilder
-import com.adobe.api.platform.runtime.mesos.LIKE
 import com.adobe.api.platform.runtime.mesos.TaskDef
-import com.adobe.api.platform.runtime.mesos.UNLIKE
 import com.adobe.api.platform.runtime.mesos.User
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.Network
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.PortMapping
@@ -68,9 +65,9 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
       Some(0),
       true,
       User("usernet"),
-      parameters)
-    val command = new CommandDef(environment = environment)
-    val taskInfo = new DefaultTaskBuilder().apply(taskDef, offers.getOffers(0), resources, portMappings, command)
+      parameters,
+      Some(CommandDef(environment = environment)))
+    val taskInfo = new DefaultTaskBuilder().apply(taskDef, offers.getOffers(0), resources, portMappings)
 
     taskInfo.getTaskId.getValue shouldBe taskDef.taskId
     taskInfo.getName shouldBe taskDef.taskName
