@@ -15,15 +15,86 @@
 package com.adobe.api.platform.runtime.mesos
 
 import akka.event.LoggingAdapter
+import org.apache.mesos.v1.Protos.ContainerInfo
+import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.PortMapping
+import org.apache.mesos.v1.Protos.HealthCheck
+import org.apache.mesos.v1.Protos.HealthCheck.TCPCheckInfo
+import org.apache.mesos.v1.Protos.NetworkInfo
 import org.apache.mesos.v1.Protos.Offer
+import org.apache.mesos.v1.Protos.Parameter
 import org.apache.mesos.v1.Protos.Resource
+import org.apache.mesos.v1.Protos.TaskID
 import org.apache.mesos.v1.Protos.TaskInfo
+import scala.collection.JavaConverters._
 
 trait TaskBuilder {
-  def apply(reqs: TaskDef,
-            offer: Offer,
-            resources: Seq[Resource],
-            portMappings: Seq[PortMapping],
-            command: CommandDef = null)(implicit logger: LoggingAdapter): TaskInfo
+  def commandBuilder: CommandBuilder
+  def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(
+    implicit logger: LoggingAdapter): TaskInfo
+}
+
+class DefaultTaskBuilder extends TaskBuilder {
+  val commandBuilder = new DefaultCommandBuilder()
+  def apply(reqs: TaskDef, offer: Offer, resources: Seq[Resource], portMappings: Seq[PortMapping])(
+    implicit logger: LoggingAdapter): TaskInfo = {
+
+    val parameters = reqs.dockerRunParameters.flatMap {
+      case (k, v) =>
+        v.map(pv => Parameter.newBuilder().setKey(k).setValue(pv).build())
+    }.asJava
+
+    val dockerNetwork = reqs.network match {
+      case _: User => DockerInfo.Network.USER
+      case Host    => DockerInfo.Network.HOST
+      case Bridge  => DockerInfo.Network.BRIDGE
+    }
+
+    //for case of user network, create a single NetworkInfo with the name
+    val networkInfos = reqs.network match {
+      case u: User =>
+        Seq[NetworkInfo](
+          NetworkInfo
+            .newBuilder()
+            .setName(u.name)
+            .build()).asJava
+      case _ => Seq[NetworkInfo]().asJava
+    }
+    val taskBuilder = TaskInfo.newBuilder
+      .setName(reqs.taskName)
+      .setTaskId(TaskID.newBuilder
+        .setValue(reqs.taskId))
+      .setAgentId(offer.getAgentId)
+      .setContainer(
+        ContainerInfo.newBuilder
+          .setType(ContainerInfo.Type.DOCKER)
+          .addAllNetworkInfos(networkInfos)
+          .setDocker(
+            DockerInfo.newBuilder
+              .setImage(reqs.dockerImage)
+              .setNetwork(dockerNetwork)
+              .addAllParameters(parameters)
+              .addAllPortMappings(portMappings.asJava)
+              .build())
+          .build())
+      .addAllResources(resources.asJava)
+    reqs.commandDef.foreach(c => {
+      taskBuilder.setCommand(commandBuilder(c))
+    })
+    reqs.healthCheckPortIndex.foreach(h => {
+      taskBuilder.setHealthCheck(
+        HealthCheck
+          .newBuilder()
+          .setType(HealthCheck.Type.TCP)
+          .setTcp(TCPCheckInfo
+            .newBuilder()
+            .setPort(reqs.ports(h)))
+          .setDelaySeconds(0)
+          .setIntervalSeconds(1)
+          .setTimeoutSeconds(1)
+          .setGracePeriodSeconds(25)
+          .build())
+    })
+    taskBuilder.build()
+  }
 }

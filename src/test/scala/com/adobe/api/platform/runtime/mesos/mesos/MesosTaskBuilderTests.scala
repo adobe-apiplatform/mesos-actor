@@ -16,7 +16,10 @@ package com.adobe.api.platform.runtime.mesos.mesos
 
 import akka.actor.ActorSystem
 import akka.event.LoggingAdapter
-import com.adobe.api.platform.runtime.mesos._
+import com.adobe.api.platform.runtime.mesos.CommandDef
+import com.adobe.api.platform.runtime.mesos.DefaultTaskBuilder
+import com.adobe.api.platform.runtime.mesos.TaskDef
+import com.adobe.api.platform.runtime.mesos.User
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.Network
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.PortMapping
 import org.apache.mesos.v1.Protos.Resource
@@ -29,26 +32,42 @@ import org.scalatest.junit.JUnitRunner
 @RunWith(classOf[JUnitRunner])
 class MesosTaskBuilderTests extends FlatSpec with Matchers {
   behavior of "Mesos Default TaskBuilder"
-  implicit val actorSystem:ActorSystem = ActorSystem("test-system")
-  implicit val logger:LoggingAdapter = actorSystem.log
+  implicit val actorSystem: ActorSystem = ActorSystem("test-system")
+  implicit val logger: LoggingAdapter = actorSystem.log
 
   it should "set TaskInfo properties from TaskDef" in {
     val offers = ProtobufUtil.getOffers("/offer1.json")
-    val resources = Seq(Resource.newBuilder()
-            .setName("cpus")
-            .setType(Value.Type.SCALAR)
-            .setScalar(Value.Scalar.newBuilder().setValue(0.1))
-            .build())
-    val portMappings = Seq(PortMapping.newBuilder()
-                    .setHostPort(31000)
-                    .setContainerPort(112233)
-            .build())
-    val parameters = Map("dns" -> Set("1.2.3.4", "8.8.8.8"), "cap-drop" -> Set("NET_RAW", "NET_ADMIN"), "ulimit" -> Set("nofile=1024:1024"))
+    val resources = Seq(
+      Resource
+        .newBuilder()
+        .setName("cpus")
+        .setType(Value.Type.SCALAR)
+        .setScalar(Value.Scalar.newBuilder().setValue(0.1))
+        .build())
+    val portMappings = Seq(
+      PortMapping
+        .newBuilder()
+        .setHostPort(31000)
+        .setContainerPort(112233)
+        .build())
+    val parameters = Map(
+      "dns" -> Set("1.2.3.4", "8.8.8.8"),
+      "cap-drop" -> Set("NET_RAW", "NET_ADMIN"),
+      "ulimit" -> Set("nofile=1024:1024"))
     val environment = Map("VAR1" -> "VAL1", "VAR2" -> "VAL2")
-    val taskDef = TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(112233), Some(0), true, User("usernet"), parameters)
-    val command = new CommandDef(environment = environment)
-    val taskInfo = DefaultTaskBuilder.apply(taskDef, offers.getOffers(0), resources, portMappings, command)
-
+    val taskDef = TaskDef(
+      "taskId",
+      "taskName",
+      "dockerImage:someTag",
+      0.1,
+      256,
+      List(112233),
+      Some(0),
+      true,
+      User("usernet"),
+      parameters,
+      Some(CommandDef(environment = environment)))
+    val taskInfo = new DefaultTaskBuilder()(taskDef, offers.getOffers(0), resources, portMappings)
 
     taskInfo.getTaskId.getValue shouldBe taskDef.taskId
     taskInfo.getName shouldBe taskDef.taskName

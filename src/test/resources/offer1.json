@@ -54,6 +54,19 @@
         "role": "*"
       }
     }],
+    "attributes": [{
+      "name": "att1",
+      "type": "TEXT",
+      "text": {
+        "value": "att1valueslave1"
+      }
+    }, {
+      "name": "att2",
+      "type": "TEXT",
+      "text": {
+        "value": "att2valueslave1"
+      }
+    }],
     "url": {
       "scheme": "http",
       "address": {
