@@ -9,7 +9,7 @@
     "type": "DOCKER",
     "volumes": [],
     "docker": {
-      "image": "adobeapiplatform/mesos-actor",
+      "image": "adobeapiplatform/mesos-actor:latest",
       "network": "BRIDGE",
       "portMappings": [
         {
@@ -19,6 +19,13 @@
           "protocol": "tcp",
           "name": "cluster",
           "labels": {}
+        },
+        {
+          "containerPort": 19999,
+          "hostPort": 0,
+          "servicePort": 10206,
+          "protocol": "tcp",
+          "name": "akkamgmthttp"
         }
       ],
       "privileged": false,
@@ -30,6 +37,9 @@
     "AKKA_CLUSTER_DISCOVERY_URL": "http://192.168.99.100:8080/v2/apps/akka-cluster/tasks",
     "LIBPROCESS_IP": "192.168.99.100"
   },
+  "labels": {
+    "ACTOR_SYSTEM_NAME": "marathon-api-docker-app-label"
+  },
   "healthChecks": [
     {
       "protocol": "TCP",
@@ -39,14 +49,6 @@
       "timeoutSeconds": 5,
       "maxConsecutiveFailures": 3,
       "ignoreHttp1xx": false
-    }
-  ],
-  "portDefinitions": [
-    {
-      "port": 10000,
-      "protocol": "tcp",
-      "name": "2551",
-      "labels": {}
     }
   ]
 }

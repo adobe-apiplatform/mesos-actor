@@ -36,6 +36,10 @@ dependencies {
     //akka-http
     compile "com.typesafe.akka:akka-http_${scalaVersion}:${akkaHttpVersion}"
 
+    //akka-management + akka-discovery
+    compile "com.lightbend.akka.management:akka-management-cluster-bootstrap_${scalaVersion}:0.10.0"
+    compile "com.lightbend.akka.discovery:akka-discovery-marathon-api_${scalaVersion}:0.10.0"
+
     //for mesos
     compile "org.apache.mesos:mesos:1.2.1"
     //for recordIO
