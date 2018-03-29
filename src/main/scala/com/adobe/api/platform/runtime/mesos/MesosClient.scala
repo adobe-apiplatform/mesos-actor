@@ -360,9 +360,9 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
                   //dig the hostname out of the offer whose agent id matches the agent id in the task info
                   val hostname =
                     event.getOffersList.asScala.find(p => p.getAgentId == task._1.getAgentId).get.getHostname
-                  log.info(s"updating task ${task._1.getTaskId.getValue} to Submitted")
-                  tasks.update(task._1.getTaskId.getValue, Submitted(s, task._1, entry._1, hostname, task._2, promise))
-                  log.info(s"done updating task ${task._1.getTaskId.getValue}")
+                  log.info(s"updating task ${reqs.taskId} to Submitted")
+                  tasks.update(reqs.taskId, Submitted(s, task._1, entry._1, hostname, task._2, promise))
+                  log.info(s"done updating task ${reqs.taskId}")
                 case previousState => log.warning(s"submitted a task that was not in SubmitPending? ${previousState}")
               }
             })

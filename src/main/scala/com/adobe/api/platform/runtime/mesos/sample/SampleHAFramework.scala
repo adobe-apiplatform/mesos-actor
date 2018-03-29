@@ -14,13 +14,14 @@
 
 package com.adobe.api.platform.runtime.mesos.sample
 
-import akka.actor.ActorRef
-import akka.actor.PoisonPill
-import akka.actor.Stash
 import akka.actor.Actor
 import akka.actor.ActorLogging
+import akka.actor.ActorRef
 import akka.actor.ActorSystem
+import akka.actor.PoisonPill
 import akka.actor.Props
+import akka.actor.Stash
+import akka.cluster.Cluster
 import akka.cluster.ClusterEvent._
 import akka.cluster.ddata.DistributedData
 import akka.cluster.ddata.LWWMap
@@ -34,10 +35,11 @@ import akka.cluster.singleton.ClusterSingletonManager
 import akka.cluster.singleton.ClusterSingletonManagerSettings
 import akka.cluster.singleton.ClusterSingletonProxy
 import akka.cluster.singleton.ClusterSingletonProxySettings
-import akka.cluster.Cluster
-import akka.cluster.ClusterEvent
+import akka.management.AkkaManagement
+import akka.management.cluster.bootstrap.ClusterBootstrap
 import akka.pattern.ask
 import akka.util.Timeout
+import com.adobe.api.platform.runtime.mesos.CommandDef
 import com.adobe.api.platform.runtime.mesos.DeleteTask
 import com.adobe.api.platform.runtime.mesos.Deleted
 import com.adobe.api.platform.runtime.mesos.DistributedDataTaskStore
@@ -48,8 +50,6 @@ import com.adobe.api.platform.runtime.mesos.Subscribe
 import com.adobe.api.platform.runtime.mesos.SubscribeComplete
 import com.adobe.api.platform.runtime.mesos.TaskDef
 import com.adobe.api.platform.runtime.mesos.TaskState
-import com.typesafe.config.Config
-import com.typesafe.config.ConfigFactory
 import java.time.Instant
 import java.util.UUID
 import scala.concurrent.Future
@@ -67,11 +67,7 @@ object SampleHAFramework {
   }
   def nextId() = "sample-task-" + UUID.randomUUID()
 
-  // Create an Akka system
-  val config: Config = ConfigFactory.load()
-  val clusterName: String = config.getString("akka.cluster.name")
-
-  val system = ActorSystem(clusterName)
+  val system = ActorSystem("sample-ha-framework")
   implicit val ec = system.dispatcher
   implicit val log = system.log
   implicit val cluster = Cluster(system)
@@ -82,19 +78,12 @@ object SampleHAFramework {
 
     val taskLaunchTimeout = Timeout(30 seconds)
     val taskDeleteTimeout = Timeout(10 seconds)
-    val teardownTimeout = Timeout(5 seconds)
-    System.out.println(config.toString)
-
-    System.out.println(s"Starting a cluster named: ${clusterName}")
-
     // Create an actor that handles cluster domain events
-    val frameworkActor = system.actorOf(Props(SimpleClusterListener), name = "clusterListener")
+    system.actorOf(Props(SimpleClusterListener), name = "clusterListener")
 
-    val seedNodes = MarathonConfig.getSeedNodes(config)
-    System.out.println(s"joining cluster with seed nodes ${seedNodes}")
-
-    cluster.joinSeedNodes(seedNodes.toList)
-
+    //use akka management + cluster bootstrap to init the cluster
+    AkkaManagement(system).start()
+    ClusterBootstrap(system).start()
     //create task store
     val tasks = new DistributedDataTaskStore(system)
 
@@ -117,7 +106,6 @@ object SampleHAFramework {
         .props(singletonManagerPath = "/user/mesosClientMaster", settings = ClusterSingletonProxySettings(system)),
       name = "mesosClientProxy")
 
-    //TODO: wait for subscription completion; make subscription
     log.info("waiting for subscription to complete")
     mesosClientActor
       .ask(Subscribe)
@@ -137,7 +125,15 @@ object SampleHAFramework {
           val taskId = nextId()
           log.info(s"launching task id ${taskId}")
           val task =
-            TaskDef(taskId, nextName(), "trinitronx/python-simplehttpserver", 0.1, 24, List(8080, 8081), Some(0))
+            TaskDef(
+              taskId,
+              nextName(),
+              "trinitronx/python-simplehttpserver",
+              0.1,
+              24,
+              List(8080, 8081),
+              Some(0),
+              commandDef = Some(CommandDef()))
           val launched: Future[TaskState] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskState]
           launched map {
             case taskDetails: Running => {
@@ -228,33 +224,18 @@ private final case class Request(key: String)
 
 object SimpleClusterListener extends Actor with ActorLogging with Stash {
   implicit val cluster = Cluster(context.system)
-  var isSubscribed = false
-  val subscribeTimeout = 30.seconds
-  val teardownTimeout = 30.seconds
-
-  implicit val ec = context.system.dispatcher
 
   // subscribe to cluster changes, re-subscribe when restart
   override def preStart(): Unit = {
-    cluster.subscribe(self, classOf[MemberEvent], classOf[UnreachableMember], classOf[ClusterEvent.LeaderChanged])
+    cluster.subscribe(self, classOf[MemberEvent], classOf[UnreachableMember])
   }
   override def postStop(): Unit = cluster.unsubscribe(self)
 
   def receive = {
-    case state: CurrentClusterState =>
-      log.info("Current members: {}. Leader: {}", state.members.size, state.getLeader)
-    case MemberUp(member) =>
-      log.info("Member is Up: {}", member.address)
     case UnreachableMember(member) =>
-      log.info("Member detected as unreachable: {}", member)
-      //TODO: verify down at marathon, then remove
+      log.info("Explicitly downing unreachable node: {}", member)
       Cluster.get(context.system).down(member.address)
-    case MemberRemoved(member, previousStatus) =>
-      log.info("Member is Removed: {} after {}", member.address, previousStatus)
-    case LeaderChanged(node) =>
-      log.info("Leader changed to {}", node)
-    case event: MemberEvent =>
-      log.info("Member event at {}, status: {}", event.member.address, event.member.status)
+    case _ =>
     // ignore
 
   }

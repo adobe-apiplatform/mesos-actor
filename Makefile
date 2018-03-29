@@ -3,7 +3,7 @@ docker:
 	docker build -t adobeapiplatform/mesos-actor .
 
 scala:
-	./gradlew build
+	./gradlew clean build
 
 .PHONY: all
 all: scala docker
