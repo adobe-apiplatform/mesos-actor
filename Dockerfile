@@ -28,6 +28,9 @@ ENV LIBPROCESS_IP 0.0.0.0
 ENV HOST 0.0.0.0
 ENV PORT_2551 2551
 
-CMD ./mesos-actor-*/bin/mesos-actor
+#create symlink so that we have a well known script name (no wildcards) to execute
+RUN ln -s ./mesos-actor-* ./mesos-actor
+#use the exec form of CMD so that signals will pass to the application script
+CMD ["./mesos-actor/bin/mesos-actor"]
 
 EXPOSE 8080

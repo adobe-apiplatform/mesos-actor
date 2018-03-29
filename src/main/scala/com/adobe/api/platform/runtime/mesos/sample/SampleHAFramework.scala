@@ -14,15 +14,10 @@
 
 package com.adobe.api.platform.runtime.mesos.sample
 
-import akka.actor.Actor
-import akka.actor.ActorLogging
 import akka.actor.ActorRef
 import akka.actor.ActorSystem
 import akka.actor.PoisonPill
-import akka.actor.Props
-import akka.actor.Stash
 import akka.cluster.Cluster
-import akka.cluster.ClusterEvent._
 import akka.cluster.ddata.DistributedData
 import akka.cluster.ddata.LWWMap
 import akka.cluster.ddata.LWWMapKey
@@ -78,8 +73,6 @@ object SampleHAFramework {
 
     val taskLaunchTimeout = Timeout(30 seconds)
     val taskDeleteTimeout = Timeout(10 seconds)
-    // Create an actor that handles cluster domain events
-    system.actorOf(Props(SimpleClusterListener), name = "clusterListener")
 
     //use akka management + cluster bootstrap to init the cluster
     AkkaManagement(system).start()
@@ -221,23 +214,3 @@ object SampleHAFramework {
 }
 
 private final case class Request(key: String)
-
-object SimpleClusterListener extends Actor with ActorLogging with Stash {
-  implicit val cluster = Cluster(context.system)
-
-  // subscribe to cluster changes, re-subscribe when restart
-  override def preStart(): Unit = {
-    cluster.subscribe(self, classOf[MemberEvent], classOf[UnreachableMember])
-  }
-  override def postStop(): Unit = cluster.unsubscribe(self)
-
-  def receive = {
-    case UnreachableMember(member) =>
-      log.info("Explicitly downing unreachable node: {}", member)
-      Cluster.get(context.system).down(member.address)
-    case _ =>
-    // ignore
-
-  }
-
-}
