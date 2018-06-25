@@ -1,3 +1,6 @@
+[![Build Status](https://circleci.com/gh/adobe-apiplatform/mesos-actor.png?style=badge)](https://circleci.com/gh/adobe-apiplatform/mesos-actor)
+
+
 # Actor library for Apache Mesos.
 
 A lightweight meta-framework for assembling Apache Mesos Frameworks (schedulers). 
