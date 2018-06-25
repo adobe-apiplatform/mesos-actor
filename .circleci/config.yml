@@ -21,8 +21,9 @@ jobs:
             - dependency-cache-{{ checksum "build.gradle" }}
             # fallback to using the latest cache if no exact match is found
             - dependency-cache-
-      - run: ./gradlew build checkScalafmt
+      - run: ./gradlew testScoverage reportScoverage build checkScalafmt -x test
       - run: docker build -t adobeapiplatform/mesos-actor .
+      - run: bash <(curl -s https://codecov.io/bash)
       - save_cache:
           paths:
             - ~/.gradle

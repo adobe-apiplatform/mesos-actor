@@ -2,6 +2,7 @@
 plugins {
     id "com.jfrog.bintray" version "1.8.0"
     id "cz.alenkacz.gradle.scalafmt" version "1.6.0"
+    id "org.scoverage" version "2.3.0"
 }
 
 
@@ -9,6 +10,7 @@ apply plugin: 'scala'
 apply plugin: 'idea'
 apply plugin: 'maven'
 apply plugin: 'application'
+apply plugin: 'org.scoverage'
 
 mainClassName = "com.adobe.api.platform.runtime.mesos.sample.SampleHAFramework"
 
@@ -50,6 +52,7 @@ dependencies {
     testCompile 'org.scalatest:scalatest_2.11:3.0.1'
     testCompile "com.typesafe.akka:akka-testkit_${scalaVersion}:${akkaVersion}"
     testCompile 'junit:junit:4.11'
+    scoverage gradle.scoverage.deps
 
 }
 group = 'com.adobe.api.platform.runtime'
