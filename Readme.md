@@ -1,4 +1,5 @@
 [![Build Status](https://circleci.com/gh/adobe-apiplatform/mesos-actor.png?style=shield)](https://circleci.com/gh/adobe-apiplatform/mesos-actor)
+[![codecov](https://codecov.io/gh/adobe-apiplatform/mesos-actor/branch/master/graph/badge.svg)](https://codecov.io/gh/adobe-apiplatform/mesos-actor)
 
 # Actor library for Apache Mesos.
 
