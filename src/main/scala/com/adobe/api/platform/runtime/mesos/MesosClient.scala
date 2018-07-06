@@ -347,7 +347,18 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       execInternal(declineCall)
 
     } else {
+      //Decline the offers not selected. Sometimes these just stay dangling in mesos outstanding offers
+      val offerIds = asScalaBuffer(event.getOffersList).map(offer => offer.getId).filter(!matchedTasks.contains(_))
 
+      val declineCall = Call.newBuilder
+        .setFrameworkId(frameworkID)
+        .setType(Call.Type.DECLINE)
+        .setDecline(Call.Decline.newBuilder
+          .addAllOfferIds(seqAsJavaList(offerIds)))
+        .build;
+
+      execInternal(declineCall)
+      
       val taskInfos: java.lang.Iterable[TaskInfo] = matchedTasks.map(_._2.map(_._1)).flatten.asJava
       val acceptCall = MesosClient.accept(frameworkID, matchedTasks.keys.asJava, taskInfos)
 
