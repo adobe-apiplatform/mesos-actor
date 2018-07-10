@@ -38,7 +38,11 @@ class DefaultTaskMatcher extends TaskMatcher {
     var result = Map[OfferID, Seq[(TaskInfo, Seq[Int])]]()
     var acceptedOfferAgent
       : String = null //accepted offers must reside on single agent: https://github.com/apache/mesos/blob/master/src/master/validation.cpp#L1768
-    o.map(offer => {
+    val sortedOffers = o.toSeq.sortBy(_.getResourcesList.asScala
+                                    .filter(_.getName == "cpus")(0)
+                                    .getScalar.getValue)
+
+    sortedOffers.map(offer => {
 
       //TODO: manage explicit and default roles, similar to https://github.com/mesos/kafka/pull/103/files
       val portsItr = offer.getResourcesList.asScala
