@@ -38,9 +38,11 @@ class DefaultTaskMatcher extends TaskMatcher {
     var result = Map[OfferID, Seq[(TaskInfo, Seq[Int])]]()
     var acceptedOfferAgent
       : String = null //accepted offers must reside on single agent: https://github.com/apache/mesos/blob/master/src/master/validation.cpp#L1768
-    val sortedOffers = o.toSeq.sortBy(_.getResourcesList.asScala
-                                    .filter(_.getName == "cpus")(0)
-                                    .getScalar.getValue)
+    val sortedOffers = o.toSeq.sortBy(
+      _.getResourcesList.asScala
+        .filter(_.getName == "cpus")(0)
+        .getScalar
+        .getValue)
 
     sortedOffers.map(offer => {
 
