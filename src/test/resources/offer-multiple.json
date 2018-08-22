@@ -1,0 +1,164 @@
+{
+  "offers": [{
+    "id": {
+      "value": "7168e411-c3e4-4e29-b292-9b12eda4aaca-O58"
+    },
+    "frameworkId": {
+      "value": "sample-11fdf320-311f-42b0-a284-dbc38bb8d191"
+    },
+    "agentId": {
+      "value": "db6b062d-84e3-4a2e-a8c5-98ffa944a304-S0"
+    },
+    "hostname": "192.168.99.100",
+    "resources": [{
+      "name": "ports",
+      "type": "RANGES",
+      "ranges": {
+        "range": [{
+          "begin": "11001",
+          "end": "11199"
+        }]
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "*"
+      }
+    }, {
+      "name": "cpus",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 0.8
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "*"
+      }
+    }, {
+      "name": "mem",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 2902.0
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "*"
+      }
+    }, {
+      "name": "disk",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 13185.0
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "*"
+      }
+    }],
+    "attributes": [{
+      "name": "att1",
+      "type": "TEXT",
+      "text": {
+        "value": "att1valueslave1"
+      }
+    }, {
+      "name": "att2",
+      "type": "TEXT",
+      "text": {
+        "value": "att2valueslave1"
+      }
+    }],
+    "url": {
+      "scheme": "http",
+      "address": {
+        "hostname": "192.168.99.100",
+        "ip": "192.168.99.100",
+        "port": 5051
+      },
+      "path": "/slave(1)"
+    },
+    "allocationInfo": {
+      "role": "*"
+    }
+  },
+    {
+      "id": {
+        "value": "7168e411-c3e4-4e29-b292-9b12eda4aaca-O59"
+      },
+      "frameworkId": {
+        "value": "sample-11fdf320-311f-42b0-a284-dbc38bb8d191"
+      },
+      "agentId": {
+        "value": "db6b062d-84e3-4a2e-a8c5-98ffa944a304-S1"
+      },
+      "hostname": "192.168.99.100",
+      "resources": [{
+        "name": "ports",
+        "type": "RANGES",
+        "ranges": {
+          "range": [{
+            "begin": "11001",
+            "end": "11199"
+          }]
+        },
+        "role": "*",
+        "allocationInfo": {
+          "role": "*"
+        }
+      }, {
+        "name": "cpus",
+        "type": "SCALAR",
+        "scalar": {
+          "value": 0.9
+        },
+        "role": "*",
+        "allocationInfo": {
+          "role": "*"
+        }
+      }, {
+        "name": "mem",
+        "type": "SCALAR",
+        "scalar": {
+          "value": 2902.0
+        },
+        "role": "*",
+        "allocationInfo": {
+          "role": "*"
+        }
+      }, {
+        "name": "disk",
+        "type": "SCALAR",
+        "scalar": {
+          "value": 13185.0
+        },
+        "role": "*",
+        "allocationInfo": {
+          "role": "*"
+        }
+      }],
+      "attributes": [{
+        "name": "att1",
+        "type": "TEXT",
+        "text": {
+          "value": "att1valueslave2"
+        }
+      }, {
+        "name": "att2",
+        "type": "TEXT",
+        "text": {
+          "value": "att2valueslave2"
+        }
+      }],
+      "url": {
+        "scheme": "http",
+        "address": {
+          "hostname": "192.168.99.100",
+          "ip": "192.168.99.100",
+          "port": 5051
+        },
+        "path": "/slave(2)"
+      },
+      "allocationInfo": {
+        "role": "*"
+      }
+    }]
+}
