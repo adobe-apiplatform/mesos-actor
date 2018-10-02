@@ -64,8 +64,7 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
       true,
       User("usernet"),
       parameters,
-      Some(CommandDef(environment = environment)),
-      healthCheckParams = Map("timeout" -> 2, "maxConsecutiveFailures" -> 2))
+      Some(CommandDef(environment = environment)))
     val taskInfo = new DefaultTaskBuilder()(taskDef, offers.getOffers(0), resources, portMappings)
 
     taskInfo.getTaskId.getValue shouldBe taskDef.taskId
