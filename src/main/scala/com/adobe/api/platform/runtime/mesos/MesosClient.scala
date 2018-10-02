@@ -90,7 +90,8 @@ case class TaskDef(taskId: String,
                    network: Network = Bridge,
                    dockerRunParameters: Map[String, Set[String]] = Map.empty,
                    commandDef: Option[CommandDef] = None,
-                   constraints: Set[Constraint] = Set.empty)
+                   constraints: Set[Constraint] = Set.empty,
+                   healthCheckParams: Map[String, Int] = Map.empty)
 
 case class HealthCheckConfig(delay: Double = 0,
                              interval: Double = 1,
