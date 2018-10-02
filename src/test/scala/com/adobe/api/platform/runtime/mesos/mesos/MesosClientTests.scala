@@ -99,7 +99,7 @@ class MesosClientTests
           0.1,
           256,
           List(8080),
-          Some(0),
+          healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = Some(0))),
           commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
       //receive offers
       mesosClient ! ProtobufUtil.getOffers("/offer1.json")
