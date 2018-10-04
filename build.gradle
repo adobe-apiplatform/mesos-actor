@@ -58,6 +58,10 @@ dependencies {
 group = 'com.adobe.api.platform.runtime'
 version = "${version}"
 
+scoverage {
+  excludedPackages = [ 'com.adobe.api.platform.runtime.mesos.sample.*' ]
+}
+
 allprojects {
     repositories {
         jcenter()
