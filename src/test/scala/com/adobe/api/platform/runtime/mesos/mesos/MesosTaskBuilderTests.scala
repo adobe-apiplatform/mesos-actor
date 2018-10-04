@@ -60,7 +60,7 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
       256,
       List(112233),
       healthCheckParams =
-        Some(HealthCheckConfig(timeout = 2, maxConsecutiveFailures = 2, healthCheckPortIndex = Some(0))),
+        Some(HealthCheckConfig(1,2,5, gracePeriod = 30, maxConsecutiveFailures = 2, healthCheckPortIndex = 0)),
       true,
       User("usernet"),
       parameters,
@@ -90,12 +90,12 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
     taskInfo.getCommand.getEnvironment.getVariables(0).getValue shouldBe "VAL1"
     taskInfo.getCommand.getEnvironment.getVariables(1).getName shouldBe "VAR2"
     taskInfo.getCommand.getEnvironment.getVariables(1).getValue shouldBe "VAL2"
-    taskInfo.getHealthCheck.getDelaySeconds shouldBe 0
-    taskInfo.getHealthCheck.getIntervalSeconds shouldBe 1
-    taskInfo.getHealthCheck.getTimeoutSeconds shouldBe 2
-    taskInfo.getHealthCheck.getGracePeriodSeconds shouldBe 25
+    taskInfo.getHealthCheck.getDelaySeconds shouldBe 1
+    taskInfo.getHealthCheck.getIntervalSeconds shouldBe 2
+    taskInfo.getHealthCheck.getTimeoutSeconds shouldBe 5
+    taskInfo.getHealthCheck.getGracePeriodSeconds shouldBe 30
     taskInfo.getHealthCheck.getConsecutiveFailures shouldBe 2
-
+    taskInfo.getHealthCheck.getTcp.getPort shouldBe 112233
   }
 
 }

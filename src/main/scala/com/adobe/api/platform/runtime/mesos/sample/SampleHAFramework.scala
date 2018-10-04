@@ -123,7 +123,7 @@ object SampleHAFramework {
               0.1,
               24,
               List(8080, 8081),
-              Some(HealthCheckConfig(healthCheckPortIndex = Some(0))),
+              Some(HealthCheckConfig(healthCheckPortIndex = 0)),
               commandDef = Some(CommandDef()))
           val launched: Future[TaskState] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskState]
           launched map {

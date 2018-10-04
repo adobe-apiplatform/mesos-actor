@@ -97,7 +97,7 @@ case class HealthCheckConfig(delay: Double = 0,
                              timeout: Double = 1,
                              gracePeriod: Double = 25,
                              maxConsecutiveFailures: Int = 3,
-                             healthCheckPortIndex: Option[Int] = None)
+                             healthCheckPortIndex: Int)
 
 case class CommandDef(environment: Map[String, String] = Map.empty, uris: Seq[CommandURIDef] = Seq.empty)
 
