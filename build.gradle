@@ -49,7 +49,7 @@ dependencies {
     //for JSON printing of protobuf
     compile "com.google.protobuf:protobuf-java-util:3.3.1"
 
-    testCompile 'org.scalatest:scalatest_2.11:3.0.1'
+    testCompile 'org.scalatest:scalatest_2.12:3.0.1'
     testCompile "com.typesafe.akka:akka-testkit_${scalaVersion}:${akkaVersion}"
     testCompile 'junit:junit:4.11'
     scoverage gradle.scoverage.deps
