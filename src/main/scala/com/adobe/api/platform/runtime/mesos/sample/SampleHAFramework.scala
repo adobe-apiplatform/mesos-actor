@@ -108,7 +108,7 @@ object SampleHAFramework {
 
     log.info("waiting for subscription to complete")
     mesosClientActor
-      .ask(Subscribe)
+      .ask(Subscribe)(taskLaunchTimeout)
       .mapTo[SubscribeComplete]
       .map(c => {
         log.info("subscribe completed successfully...")
