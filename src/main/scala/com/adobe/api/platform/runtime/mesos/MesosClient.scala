@@ -85,12 +85,19 @@ case class TaskDef(taskId: String,
                    cpus: Double,
                    mem: Int,
                    ports: Seq[Int] = Seq.empty,
-                   healthCheckPortIndex: Option[Int] = None,
+                   healthCheckParams: Option[HealthCheckConfig] = None,
                    forcePull: Boolean = false,
                    network: Network = Bridge,
                    dockerRunParameters: Map[String, Set[String]] = Map.empty,
                    commandDef: Option[CommandDef] = None,
                    constraints: Set[Constraint] = Set.empty)
+
+case class HealthCheckConfig(healthCheckPortIndex: Int,
+                             delay: Double = 0,
+                             interval: Double = 1,
+                             timeout: Double = 1,
+                             gracePeriod: Double = 25,
+                             maxConsecutiveFailures: Int = 3)
 
 case class CommandDef(environment: Map[String, String] = Map.empty, uris: Seq[CommandURIDef] = Seq.empty)
 

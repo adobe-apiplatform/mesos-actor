@@ -39,19 +39,10 @@ import akka.management.AkkaManagement
 import akka.management.cluster.bootstrap.ClusterBootstrap
 import akka.pattern.ask
 import akka.util.Timeout
-import com.adobe.api.platform.runtime.mesos.CommandDef
-import com.adobe.api.platform.runtime.mesos.DeleteTask
-import com.adobe.api.platform.runtime.mesos.Deleted
-import com.adobe.api.platform.runtime.mesos.DistributedDataTaskStore
-import com.adobe.api.platform.runtime.mesos.MesosClient
-import com.adobe.api.platform.runtime.mesos.Running
-import com.adobe.api.platform.runtime.mesos.SubmitTask
-import com.adobe.api.platform.runtime.mesos.Subscribe
-import com.adobe.api.platform.runtime.mesos.SubscribeComplete
-import com.adobe.api.platform.runtime.mesos.TaskDef
-import com.adobe.api.platform.runtime.mesos.TaskState
+import com.adobe.api.platform.runtime.mesos._
 import java.time.Instant
 import java.util.UUID
+
 import scala.concurrent.Future
 import scala.concurrent.duration._
 
@@ -132,7 +123,7 @@ object SampleHAFramework {
               0.1,
               24,
               List(8080, 8081),
-              Some(0),
+              Some(HealthCheckConfig(0)),
               commandDef = Some(CommandDef()))
           val launched: Future[TaskState] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskState]
           launched map {
