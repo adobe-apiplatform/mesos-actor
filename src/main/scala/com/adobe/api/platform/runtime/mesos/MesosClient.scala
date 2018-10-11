@@ -92,12 +92,12 @@ case class TaskDef(taskId: String,
                    commandDef: Option[CommandDef] = None,
                    constraints: Set[Constraint] = Set.empty)
 
-case class HealthCheckConfig(delay: Double = 0,
+case class HealthCheckConfig(healthCheckPortIndex: Int,
+                             delay: Double = 0,
                              interval: Double = 1,
                              timeout: Double = 1,
                              gracePeriod: Double = 25,
-                             maxConsecutiveFailures: Int = 3,
-                             healthCheckPortIndex: Int)
+                             maxConsecutiveFailures: Int = 3)
 
 case class CommandDef(environment: Map[String, String] = Map.empty, uris: Seq[CommandURIDef] = Seq.empty)
 

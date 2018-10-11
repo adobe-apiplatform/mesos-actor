@@ -59,8 +59,7 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
       0.1,
       256,
       List(112233),
-      healthCheckParams =
-        Some(HealthCheckConfig(1,2,5, gracePeriod = 30, maxConsecutiveFailures = 2, healthCheckPortIndex = 0)),
+      healthCheckParams = Some(HealthCheckConfig(0, 1, 2, 5, gracePeriod = 30, maxConsecutiveFailures = 2)),
       true,
       User("usernet"),
       parameters,
