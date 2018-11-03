@@ -43,7 +43,7 @@ dependencies {
     compile "com.lightbend.akka.discovery:akka-discovery-marathon-api_${scalaVersion}:0.10.0"
 
     //for mesos
-    compile "org.apache.mesos:mesos:1.2.1"
+    compile "org.apache.mesos:mesos:1.2.3"
     //for recordIO
     compile "com.lightbend.akka:akka-stream-alpakka-simple-codecs_${scalaVersion}:0.9"
     //for JSON printing of protobuf
