@@ -132,6 +132,7 @@ class DefaultTaskMatcher extends TaskMatcher {
                 taskResources += Resource
                   .newBuilder()
                   .setName("ports")
+                  .setRole(role)
                   .setType(Value.Type.RANGES)
                   .setRanges(
                     Ranges
@@ -147,7 +148,7 @@ class DefaultTaskMatcher extends TaskMatcher {
               taskResources += Resource
                 .newBuilder()
                 .setName("cpus")
-                .setRole("*")
+                .setRole(role)
                 .setType(Value.Type.SCALAR)
                 .setScalar(Value.Scalar.newBuilder
                   .setValue(taskCpus))
@@ -155,7 +156,7 @@ class DefaultTaskMatcher extends TaskMatcher {
 
               taskResources += Resource.newBuilder
                 .setName("mem")
-                .setRole("*")
+                .setRole(role)
                 .setType(Value.Type.SCALAR)
                 .setScalar(Value.Scalar.newBuilder
                   .setValue(taskMem))
