@@ -88,7 +88,7 @@ class DefaultTaskMatcher extends TaskMatcher {
                 case _ => (false, s"${c.attribute} missing")
               }
             })
-            logger.info(s"constraintChecks ${constraintChecks}")
+            logger.debug(s"constraintChecks ${constraintChecks}")
             //check for a good fit
             //collect ranges from ports resources
             val offerPortsRanges = offer.getResourcesList.asScala
@@ -102,7 +102,7 @@ class DefaultTaskMatcher extends TaskMatcher {
             val matchedConstraints = !constraintChecks.exists(_._1 == false)
 
             if (!matchedConstraints) {
-              logger.info(s"offer did not match constraints ${task.constraints} (${offer.getAttributesList}) ")
+              logger.debug(s"offer did not match constraints ${task.constraints} (${offer.getAttributesList}) ")
             } else if (!matchedResources) {
               logger.info(
                 s"offer did not match resource requirements cpu:${taskCpus} (${remainingOfferCpus}), mem: ${taskMem}  (${remainingOfferMem}), ports: ${task.ports.size} (${hostPorts.size})")
