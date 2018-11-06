@@ -27,6 +27,7 @@ import com.google.protobuf.util.JsonFormat
 import java.net.URI
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.ExecutorID
+import org.apache.mesos.v1.Protos.Filters
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.Protos.Offer
 import org.apache.mesos.v1.Protos.OfferID
@@ -138,6 +139,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   val subscribeTimeout = Timeout(5 seconds)
   val autoSubscribe: Boolean
   val tasks: TaskStore
+  val refuseSeconds: Double
   var reconcilationData: mutable.Map[String, ReconcileTaskState] = mutable.Map()
 
   if (autoSubscribe) {
@@ -347,8 +349,10 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       val declineCall = Call.newBuilder
         .setFrameworkId(frameworkID)
         .setType(Call.Type.DECLINE)
-        .setDecline(Call.Decline.newBuilder
-          .addAllOfferIds(seqAsJavaList(offerIds)))
+        .setDecline(
+          Call.Decline.newBuilder
+            .addAllOfferIds(seqAsJavaList(offerIds))
+            .setFilters(Filters.newBuilder().setRefuseSeconds(refuseSeconds)))
         .build;
 
       execInternal(declineCall)
@@ -527,7 +531,8 @@ class MesosClient(val id: () => String,
                   val taskMatcher: TaskMatcher,
                   val taskBuilder: TaskBuilder,
                   val autoSubscribe: Boolean,
-                  val tasks: TaskStore)
+                  val tasks: TaskStore,
+                  val refuseSeconds: Double)
     extends MesosClientActor
     with MesosClientHttpConnection {}
 
@@ -541,7 +546,8 @@ object MesosClient {
             taskMatcher: TaskMatcher = new DefaultTaskMatcher,
             taskBuilder: TaskBuilder = new DefaultTaskBuilder,
             autoSubscribe: Boolean = false,
-            taskStore: TaskStore): Props =
+            taskStore: TaskStore,
+            refuseSeconds: Double = 5.0): Props =
     Props(
       new MesosClient(
         id,
@@ -552,7 +558,8 @@ object MesosClient {
         taskMatcher,
         taskBuilder,
         autoSubscribe,
-        taskStore))
+        taskStore,
+        refuseSeconds))
 
   //TODO: allow task persistence/reconcile
 
