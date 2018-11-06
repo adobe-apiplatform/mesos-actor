@@ -22,7 +22,6 @@ import akka.actor.ActorLogging
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.cluster.Cluster
-import akka.cluster.ClusterEvent
 import akka.cluster.ddata.DistributedData
 import akka.cluster.ddata.Key
 import akka.cluster.ddata.LWWMapKey

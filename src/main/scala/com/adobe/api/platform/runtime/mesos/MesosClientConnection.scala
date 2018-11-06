@@ -17,11 +17,15 @@ package com.adobe.api.platform.runtime.mesos
 import akka.http.scaladsl.model.HttpResponse
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.scheduler.Protos.Call
+import org.apache.mesos.v1.scheduler.Protos.Event
 import scala.concurrent.Future
+import scala.concurrent.duration.FiniteDuration
 
 trait MesosClientConnection {
   def exec(call: Call): Future[HttpResponse]
   def subscribe(frameworkID: FrameworkID,
                 frameworkName: String,
-                failoverTimeoutSecond: Double): Future[SubscribeComplete]
+                role: String,
+                failoverTimeout: FiniteDuration,
+                eventHandler: Event => Unit): Future[SubscribeComplete]
 }

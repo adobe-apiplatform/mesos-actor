@@ -27,6 +27,7 @@ import com.google.protobuf.util.JsonFormat
 import java.net.URI
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.ExecutorID
+import org.apache.mesos.v1.Protos.Filters
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.Protos.Offer
 import org.apache.mesos.v1.Protos.OfferID
@@ -123,21 +124,28 @@ case class DeletePending(taskId: String, promise: Promise[Deleted]) extends Task
 case class Deleted(taskId: String, taskStatus: TaskStatus) extends TaskState
 
 //TODO: mesos authentication
-trait MesosClientActor extends Actor with ActorLogging with MesosClientConnection {
+class MesosClientActor(id: () => String,
+                       frameworkName: String,
+                       failoverTimeoutSeconds: FiniteDuration,
+                       master: String,
+                       role: String,
+                       refuseSeconds: Double,
+                       taskMatcher: TaskMatcher,
+                       taskBuilder: TaskBuilder,
+                       tasks: TaskStore,
+                       autoSubscribe: Boolean,
+                       subscribeTimeout: Timeout,
+                       connection: Option[MesosClientConnection] = None)
+    extends Actor
+    with ActorLogging {
   implicit val ec: ExecutionContext = context.dispatcher
   implicit val logger: LoggingAdapter = context.system.log
   implicit val actorSystem: ActorSystem = context.system
 
-  val id: () => String
-  val frameworkName: String
-  val failoverTimeoutSeconds: FiniteDuration
-  val master: String
-  val role: String
-  val taskMatcher: TaskMatcher
-  val taskBuilder: TaskBuilder
-  val subscribeTimeout = Timeout(5 seconds)
-  val autoSubscribe: Boolean
-  val tasks: TaskStore
+  val masterURI = URI.create(master)
+  private val clientConnection =
+    connection.getOrElse(new MesosClientHttpConnection(masterURI.getHost, masterURI.getPort))
+
   var reconcilationData: mutable.Map[String, ReconcileTaskState] = mutable.Map()
 
   if (autoSubscribe) {
@@ -164,8 +172,6 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   private val frameworkID = FrameworkID.newBuilder().setValue(id()).build();
 
   //TODO: handle redirect to master see https://github.com/mesosphere/mesos-rxjava/blob/d6fd040af3322552012fb3dcf61debb9886adbf3/mesos-rxjava-client/src/main/java/com/mesosphere/mesos/rx/java/MesosClient.java#L167
-  val mesosUri = URI.create(s"${master}/api/v1/scheduler")
-  var streamId: String = null
   var subscribed: Option[Future[SubscribeComplete]] = None
   //private val tasks = mutable.Map[String, TaskState]()
 
@@ -178,7 +184,9 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       if (subscribed.isEmpty) {
         log.info("new subscription initiating")
         subscribed = Some(
-          subscribe(frameworkID, frameworkName, failoverTimeoutSeconds.toSeconds).pipeTo(notifyRecipient))
+          clientConnection
+            .subscribe(frameworkID, frameworkName, role, failoverTimeoutSeconds, handleEvent)
+            .pipeTo(notifyRecipient))
       } else {
         log.info("subscription already initiated")
         subscribed.get.map(c => notifyRecipient ! c)
@@ -391,12 +399,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     log.info(s"received heartbeat...")
   }
 
-  def handleSubscribed(event: Event.Subscribed) = {
-
-    //TODO: persist to zk...
-    //https://github.com/foursquare/scala-zookeeper-client
-    log.info(s"subscribed; frameworkId is ${event.getFrameworkId} streamId is ${streamId}")
-  }
+  def handleSubscribed(event: Event.Subscribed) = {}
 
   def teardown(): Future[TeardownComplete.type] = {
     log.info("submitting teardown message...")
@@ -478,15 +481,17 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   }
 
   private def execInternal(call: Call): Future[HttpResponse] = {
-    exec(call).flatMap(resp => {
-      if (!resp.status.isSuccess()) {
-        //log and fail the future if response was not "successful"
-        log.error(s"http request of type ${call.getType} returned non-successful status ${resp}")
-        Future.failed(new Exception("not successful"))
-      } else {
-        Future.successful(resp)
-      }
-    })
+    clientConnection
+      .exec(call)
+      .flatMap(resp => {
+        if (!resp.status.isSuccess()) {
+          //log and fail the future if response was not "successful"
+          log.error(s"http request of type ${call.getType} returned non-successful status ${resp}")
+          Future.failed(new Exception("not successful"))
+        } else {
+          Future.successful(resp)
+        }
+      })
   }
 
   def handleEvent(event: Event)(implicit ec: ExecutionContext): Unit = {
@@ -519,20 +524,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
 
 }
 
-class MesosClient(val id: () => String,
-                  val frameworkName: String,
-                  val master: String,
-                  val role: String,
-                  val failoverTimeoutSeconds: FiniteDuration,
-                  val taskMatcher: TaskMatcher,
-                  val taskBuilder: TaskBuilder,
-                  val autoSubscribe: Boolean,
-                  val tasks: TaskStore)
-    extends MesosClientActor
-    with MesosClientHttpConnection {}
-
 object MesosClient {
-
   def props(id: () => String,
             frameworkName: String,
             master: String,
@@ -541,18 +533,22 @@ object MesosClient {
             taskMatcher: TaskMatcher = new DefaultTaskMatcher,
             taskBuilder: TaskBuilder = new DefaultTaskBuilder,
             autoSubscribe: Boolean = false,
-            taskStore: TaskStore): Props =
+            taskStore: TaskStore,
+            refuseSeconds: Double = 5.0,
+            subscribeTimeout: Timeout = Timeout(5 seconds)): Props =
     Props(
-      new MesosClient(
+      new MesosClientActor(
         id,
         frameworkName,
+        failoverTimeoutSeconds,
         master,
         role,
-        failoverTimeoutSeconds,
+        refuseSeconds,
         taskMatcher,
         taskBuilder,
+        taskStore,
         autoSubscribe,
-        taskStore))
+        subscribeTimeout))
 
   //TODO: allow task persistence/reconcile
 

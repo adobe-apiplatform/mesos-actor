@@ -15,6 +15,9 @@
 package com.adobe.api.platform.runtime.mesos
 
 import akka.NotUsed
+import akka.actor.ActorLogging
+import akka.actor.ActorSystem
+import akka.event.LoggingAdapter
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.client.RequestBuilding.Post
 import akka.http.scaladsl.model.ContentType
@@ -49,6 +52,7 @@ import org.apache.mesos.v1.scheduler.Protos.Call
 import org.apache.mesos.v1.scheduler.Protos.Event
 import scala.concurrent.Future
 import scala.concurrent.Promise
+import scala.concurrent.duration.FiniteDuration
 import scala.util.Failure
 import scala.util.Success
 
@@ -56,12 +60,16 @@ object MesosClientContentType {
   val protobufContentType = ContentType(MediaType.applicationBinary("x-protobuf", Compressible, "proto"))
 }
 
-trait MesosClientHttpConnection extends MesosClientConnection {
-  this: MesosClientActor =>
+class MesosClientHttpConnection(host: String, port: Int)(implicit actorSystem: ActorSystem)
+    extends MesosClientConnection {
+  implicit val logger = actorSystem.log
+  implicit val ec = actorSystem.dispatcher
   implicit val materializer: ActorMaterializer = ActorMaterializer()
 
+  val mesosUri = host + ":" + port
+  var streamId: Option[String] = None
   val poolClientFlow =
-    Http().cachedHostConnectionPool[Promise[HttpResponse]](host = mesosUri.getHost, port = mesosUri.getPort)
+    Http().cachedHostConnectionPool[Promise[HttpResponse]](host = host, port = port)
   val queue =
     Source
       .queue[(HttpRequest, Promise[HttpResponse])](100, OverflowStrategy.backpressure)
@@ -73,9 +81,10 @@ trait MesosClientHttpConnection extends MesosClientConnection {
       .run()
 
   def exec(call: Call): Future[HttpResponse] = {
-    log.info(s"sending ${call.getType}")
+    logger.info(s"sending http ${call.getType}")
+    require(streamId.isDefined, "mesos-stream-id has not been set; need to subscribe first")
     val req = Post("/api/v1/scheduler")
-      .withHeaders(RawHeader("Mesos-Stream-Id", streamId))
+      .withHeaders(RawHeader("Mesos-Stream-Id", streamId.get))
       .withEntity(MesosClientContentType.protobufContentType, call.toByteArray)
     val responsePromise = Promise[HttpResponse]()
     queue.offer(req, responsePromise)
@@ -84,7 +93,9 @@ trait MesosClientHttpConnection extends MesosClientConnection {
 
   def subscribe(frameworkID: FrameworkID,
                 frameworkName: String,
-                failoverTimeoutSecond: Double): Future[SubscribeComplete] = {
+                role: String,
+                failoverTimeoutSeconds: FiniteDuration,
+                eventHandler: Event => Unit): Future[SubscribeComplete] = {
 
     import EventStreamUnmarshalling._
 
@@ -121,7 +132,7 @@ trait MesosClientHttpConnection extends MesosClientConnection {
           val newStreamId = response.getHeader("Mesos-Stream-Id").get().value()
           if (streamId == null) {
             logger.info(s"setting new streamId ${newStreamId}")
-            streamId = newStreamId
+            streamId = Some(newStreamId)
             result.success(SubscribeComplete(frameworkID.getValue))
           } else if (streamId != newStreamId) {
             //TODO: do we need to handle StreamId changes?
@@ -135,7 +146,7 @@ trait MesosClientHttpConnection extends MesosClientConnection {
       })
       .foreach(eventSource => {
         eventSource.runForeach(event => {
-          handleEvent(event)
+          eventHandler(event)
         })
       })
 
