@@ -330,13 +330,14 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
 
     val matchedTasks = taskMatcher.matchTasksToOffers(role, pending, event.getOffersList.asScala.toList, taskBuilder)
 
-    log.info(s"matched ${matchedTasks.size} tasks out of ${pending.size} pending tasks")
+    val matchedCount = matchedTasks.foldLeft(0)(_ + _._2.size)
+    log.info(s"matched ${matchedCount} tasks out of ${pending.size} pending tasks")
     pending.foreach(reqs => {
-      log.info(s"pending task: ${reqs.taskId}")
+      log.debug(s"pending task: ${reqs.taskId}")
     })
     matchedTasks.values.foreach(taskInfos => {
       taskInfos.foreach(taskInfo => {
-        log.info(s"     matched task: ${taskInfo._1.getTaskId.getValue}")
+        log.debug(s"     matched task: ${taskInfo._1.getTaskId.getValue}")
       })
     })
 
@@ -381,9 +382,9 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
           })
           if (!pending.isEmpty) {
             log.warning("still have pending tasks after OFFER + ACCEPT: ")
-            pending.foreach(t => log.info(s"     -> ${t.taskId}"))
+            pending.foreach(t => log.info(s"pending taskid ${t.taskId}"))
           }
-        case Failure(_) => log.info("failure")
+        case Failure(t) => log.error(s"failure ${t}")
       }
     }
 
@@ -392,7 +393,6 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   def pending() = tasks.collect { case (_, submitPending: SubmitPending) => submitPending.reqs }
   def handleHeartbeat(event: Event) = {
     //TODO: monitor heartbeat
-    log.info(s"received heartbeat...")
   }
 
   def handleSubscribed(event: Event.Subscribed) = {
