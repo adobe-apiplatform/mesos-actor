@@ -59,6 +59,7 @@ class MesosClientTests
     override val failoverTimeoutSeconds = 0.seconds
     override val autoSubscribe: Boolean = false
     override val tasks: TaskStore = new LocalTaskStore
+    override val refuseSeconds: Double = 1.0
 
     override def exec(call: Call): Future[HttpResponse] = {
       log.info(s"sending ${call.getType}")
