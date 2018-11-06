@@ -58,6 +58,17 @@ dependencies {
 group = 'com.adobe.api.platform.runtime'
 version = "${version}"
 
+tasks.withType(Test) {
+    systemProperties(System.getProperties())
+
+    testLogging {
+        events "passed", "skipped", "failed"
+        showStandardStreams = true
+        exceptionFormat = 'full'
+    }
+    outputs.upToDateWhen { false } // force tests to run every time
+}
+
 scoverage {
   excludedPackages = [ 'com.adobe.api.platform.runtime.mesos.sample.*' ]
 }
