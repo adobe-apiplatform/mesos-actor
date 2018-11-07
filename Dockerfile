@@ -7,13 +7,13 @@
 # Pull base image
 FROM  openjdk:8-jdk-alpine
 
-ENV SCALA_VERSION 2.11.11
+ENV SCALA_VERSION 2.12.7
 
 # Install Scala
 ## Piping curl directly in tar
 RUN \
   apk update && apk add curl && \
-  curl -fsL https://downloads.typesafe.com/scala/$SCALA_VERSION/scala-$SCALA_VERSION.tgz | tar xfz - -C /root/ && \
+  curl -fsL https://downloads.lightbend.com/scala/$SCALA_VERSION/scala-$SCALA_VERSION.tgz | tar xfz - -C /root/ && \
   echo >> /root/.bashrc && \
   echo 'export PATH=~/scala-$SCALA_VERSION/bin:$PATH' >> /root/.bashrc
 
