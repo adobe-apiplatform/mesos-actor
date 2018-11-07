@@ -27,6 +27,7 @@ import com.google.protobuf.util.JsonFormat
 import java.net.URI
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.ExecutorID
+import org.apache.mesos.v1.Protos.Filters
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.Protos.Offer
 import org.apache.mesos.v1.Protos.OfferID
@@ -84,12 +85,19 @@ case class TaskDef(taskId: String,
                    cpus: Double,
                    mem: Int,
                    ports: Seq[Int] = Seq.empty,
-                   healthCheckPortIndex: Option[Int] = None,
+                   healthCheckParams: Option[HealthCheckConfig] = None,
                    forcePull: Boolean = false,
                    network: Network = Bridge,
                    dockerRunParameters: Map[String, Set[String]] = Map.empty,
                    commandDef: Option[CommandDef] = None,
                    constraints: Set[Constraint] = Set.empty)
+
+case class HealthCheckConfig(healthCheckPortIndex: Int,
+                             delay: Double = 0,
+                             interval: Double = 1,
+                             timeout: Double = 1,
+                             gracePeriod: Double = 25,
+                             maxConsecutiveFailures: Int = 3)
 
 case class CommandDef(environment: Map[String, String] = Map.empty, uris: Seq[CommandURIDef] = Seq.empty)
 
@@ -130,6 +138,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   val subscribeTimeout = Timeout(5 seconds)
   val autoSubscribe: Boolean
   val tasks: TaskStore
+  val refuseSeconds: Double
   var reconcilationData: mutable.Map[String, ReconcileTaskState] = mutable.Map()
 
   if (autoSubscribe) {
@@ -320,13 +329,14 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
 
     val matchedTasks = taskMatcher.matchTasksToOffers(role, pending, event.getOffersList.asScala.toList, taskBuilder)
 
-    log.info(s"matched ${matchedTasks.size} tasks out of ${pending.size} pending tasks")
+    val matchedCount = matchedTasks.foldLeft(0)(_ + _._2.size)
+    log.info(s"matched ${matchedCount} tasks out of ${pending.size} pending tasks")
     pending.foreach(reqs => {
-      log.info(s"pending task: ${reqs.taskId}")
+      log.debug(s"pending task: ${reqs.taskId}")
     })
     matchedTasks.values.foreach(taskInfos => {
       taskInfos.foreach(taskInfo => {
-        log.info(s"     matched task: ${taskInfo._1.getTaskId.getValue}")
+        log.debug(s"     matched task: ${taskInfo._1.getTaskId.getValue}")
       })
     })
 
@@ -339,8 +349,10 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       val declineCall = Call.newBuilder
         .setFrameworkId(frameworkID)
         .setType(Call.Type.DECLINE)
-        .setDecline(Call.Decline.newBuilder
-          .addAllOfferIds(seqAsJavaList(offerIds)))
+        .setDecline(
+          Call.Decline.newBuilder
+            .addAllOfferIds(seqAsJavaList(offerIds))
+            .setFilters(Filters.newBuilder().setRefuseSeconds(refuseSeconds)))
         .build;
 
       execInternal(declineCall)
@@ -369,9 +381,9 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
           })
           if (!pending.isEmpty) {
             log.warning("still have pending tasks after OFFER + ACCEPT: ")
-            pending.foreach(t => log.info(s"     -> ${t.taskId}"))
+            pending.foreach(t => log.info(s"pending taskid ${t.taskId}"))
           }
-        case Failure(_) => log.info("failure")
+        case Failure(t) => log.error(s"failure ${t}")
       }
     }
 
@@ -380,7 +392,6 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   def pending() = tasks.collect { case (_, submitPending: SubmitPending) => submitPending.reqs }
   def handleHeartbeat(event: Event) = {
     //TODO: monitor heartbeat
-    log.info(s"received heartbeat...")
   }
 
   def handleSubscribed(event: Event.Subscribed) = {
@@ -519,7 +530,8 @@ class MesosClient(val id: () => String,
                   val taskMatcher: TaskMatcher,
                   val taskBuilder: TaskBuilder,
                   val autoSubscribe: Boolean,
-                  val tasks: TaskStore)
+                  val tasks: TaskStore,
+                  val refuseSeconds: Double)
     extends MesosClientActor
     with MesosClientHttpConnection {}
 
@@ -533,7 +545,8 @@ object MesosClient {
             taskMatcher: TaskMatcher = new DefaultTaskMatcher,
             taskBuilder: TaskBuilder = new DefaultTaskBuilder,
             autoSubscribe: Boolean = false,
-            taskStore: TaskStore): Props =
+            taskStore: TaskStore,
+            refuseSeconds: Double = 5.0): Props =
     Props(
       new MesosClient(
         id,
@@ -544,7 +557,8 @@ object MesosClient {
         taskMatcher,
         taskBuilder,
         autoSubscribe,
-        taskStore))
+        taskStore,
+        refuseSeconds))
 
   //TODO: allow task persistence/reconcile
 

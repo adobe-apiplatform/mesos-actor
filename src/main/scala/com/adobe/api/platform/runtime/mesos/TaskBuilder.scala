@@ -81,18 +81,19 @@ class DefaultTaskBuilder extends TaskBuilder {
     reqs.commandDef.foreach(c => {
       taskBuilder.setCommand(commandBuilder(c))
     })
-    reqs.healthCheckPortIndex.foreach(h => {
+    reqs.healthCheckParams.foreach(hcp => {
       taskBuilder.setHealthCheck(
         HealthCheck
           .newBuilder()
           .setType(HealthCheck.Type.TCP)
           .setTcp(TCPCheckInfo
             .newBuilder()
-            .setPort(reqs.ports(h)))
-          .setDelaySeconds(0)
-          .setIntervalSeconds(1)
-          .setTimeoutSeconds(1)
-          .setGracePeriodSeconds(25)
+            .setPort(reqs.ports(hcp.healthCheckPortIndex)))
+          .setDelaySeconds(hcp.delay)
+          .setIntervalSeconds(hcp.interval)
+          .setTimeoutSeconds(hcp.timeout)
+          .setGracePeriodSeconds(hcp.gracePeriod)
+          .setConsecutiveFailures(hcp.maxConsecutiveFailures)
           .build())
     })
     taskBuilder.build()

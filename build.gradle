@@ -43,7 +43,7 @@ dependencies {
     compile "com.lightbend.akka.discovery:akka-discovery-marathon-api_${scalaVersion}:0.10.0"
 
     //for mesos
-    compile "org.apache.mesos:mesos:1.2.1"
+    compile "org.apache.mesos:mesos:1.2.3"
     //for recordIO
     compile "com.lightbend.akka:akka-stream-alpakka-simple-codecs_${scalaVersion}:0.9"
     //for JSON printing of protobuf
@@ -57,6 +57,21 @@ dependencies {
 }
 group = 'com.adobe.api.platform.runtime'
 version = "${version}"
+
+tasks.withType(Test) {
+    systemProperties(System.getProperties())
+
+    testLogging {
+        events "passed", "skipped", "failed"
+        showStandardStreams = true
+        exceptionFormat = 'full'
+    }
+    outputs.upToDateWhen { false } // force tests to run every time
+}
+
+scoverage {
+  excludedPackages = [ 'com.adobe.api.platform.runtime.mesos.sample.*' ]
+}
 
 allprojects {
     repositories {

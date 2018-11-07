@@ -16,10 +16,7 @@ package com.adobe.api.platform.runtime.mesos.mesos
 
 import akka.actor.ActorSystem
 import akka.event.LoggingAdapter
-import com.adobe.api.platform.runtime.mesos.CommandDef
-import com.adobe.api.platform.runtime.mesos.DefaultTaskBuilder
-import com.adobe.api.platform.runtime.mesos.TaskDef
-import com.adobe.api.platform.runtime.mesos.User
+import com.adobe.api.platform.runtime.mesos._
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.Network
 import org.apache.mesos.v1.Protos.ContainerInfo.DockerInfo.PortMapping
 import org.apache.mesos.v1.Protos.Resource
@@ -62,7 +59,7 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
       0.1,
       256,
       List(112233),
-      Some(0),
+      healthCheckParams = Some(HealthCheckConfig(0, 1, 2, 5, gracePeriod = 30, maxConsecutiveFailures = 2)),
       true,
       User("usernet"),
       parameters,
@@ -92,7 +89,12 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
     taskInfo.getCommand.getEnvironment.getVariables(0).getValue shouldBe "VAL1"
     taskInfo.getCommand.getEnvironment.getVariables(1).getName shouldBe "VAR2"
     taskInfo.getCommand.getEnvironment.getVariables(1).getValue shouldBe "VAL2"
-
+    taskInfo.getHealthCheck.getDelaySeconds shouldBe 1
+    taskInfo.getHealthCheck.getIntervalSeconds shouldBe 2
+    taskInfo.getHealthCheck.getTimeoutSeconds shouldBe 5
+    taskInfo.getHealthCheck.getGracePeriodSeconds shouldBe 30
+    taskInfo.getHealthCheck.getConsecutiveFailures shouldBe 2
+    taskInfo.getHealthCheck.getTcp.getPort shouldBe 112233
   }
 
 }
