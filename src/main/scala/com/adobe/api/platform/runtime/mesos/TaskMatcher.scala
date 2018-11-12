@@ -48,13 +48,10 @@ class DefaultTaskMatcher extends TaskMatcher {
 
       //TODO: manage explicit and default roles, similar to https://github.com/mesos/kafka/pull/103/files
       val portsItr = offer.getResourcesList.asScala
+        .filter(_.getRole == role) //ignore resources with other roles
         .filter(res => res.getName == "ports")
         .iterator
       val hasSomePorts = portsItr.nonEmpty && portsItr.next().getRanges.getRangeList.size() > 0
-      if (!hasSomePorts) {
-        //TODO: log info about skipping due to lack of ports...
-        logger.warning("no ports!!!")
-      }
 
       val agentId = offer.getAgentId.getValue
       if (hasSomePorts && (acceptedOfferAgent == null || acceptedOfferAgent == agentId)) {
@@ -93,6 +90,7 @@ class DefaultTaskMatcher extends TaskMatcher {
             //collect ranges from ports resources
             val offerPortsRanges = offer.getResourcesList.asScala
               .filter(res => res.getName == "ports")
+              .filter(_.getRole == role) //ignore resources with other roles
               .map(res => res.getRanges)
             //pluck the number of ports needed for this task
             val hostPorts = pluckPorts(offerPortsRanges, task.ports.size, usedPorts)
