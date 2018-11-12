@@ -15,6 +15,7 @@
 package com.adobe.api.platform.runtime.mesos
 
 import akka.NotUsed
+import akka.event.Logging.InfoLevel
 import akka.http.scaladsl.Http
 import akka.http.scaladsl.client.RequestBuilding.Post
 import akka.http.scaladsl.model.ContentType
@@ -27,6 +28,7 @@ import akka.http.scaladsl.model.headers.RawHeader
 import akka.http.scaladsl.unmarshalling.FromEntityUnmarshaller
 import akka.http.scaladsl.unmarshalling.Unmarshal
 import akka.http.scaladsl.unmarshalling.Unmarshaller
+import akka.pattern.AskTimeoutException
 import akka.stream.ActorMaterializer
 import akka.stream.Attributes
 import akka.stream.FlowShape
@@ -46,6 +48,7 @@ import java.util.Optional
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.Protos.FrameworkInfo
 import org.apache.mesos.v1.scheduler.Protos.Call
+import org.apache.mesos.v1.scheduler.Protos.Call.Suppress
 import org.apache.mesos.v1.scheduler.Protos.Event
 import scala.concurrent.Future
 import scala.concurrent.Promise
@@ -84,7 +87,8 @@ trait MesosClientHttpConnection extends MesosClientConnection {
 
   def subscribe(frameworkID: FrameworkID,
                 frameworkName: String,
-                failoverTimeoutSecond: Double): Future[SubscribeComplete] = {
+                failoverTimeoutSecond: Double,
+                suppressedRoles: Option[Seq[String]] = None): Future[SubscribeComplete] = {
 
     import EventStreamUnmarshalling._
 
@@ -122,6 +126,18 @@ trait MesosClientHttpConnection extends MesosClientConnection {
           if (streamId == null) {
             logger.info(s"setting new streamId ${newStreamId}")
             streamId = newStreamId
+            suppressedRoles.map {
+              suppressed =>
+                val suppressedCall = Call.newBuilder
+                  .setFrameworkId(frameworkID)
+                  .setType(Call.Type.SUPPRESS)
+                  .setSuppress(Suppress.newBuilder().setRole(suppressed.mkString(",")))
+                  .build()
+                exec(suppressedCall).andThen {
+                  case Success(r) => logger.info(s"suppressed offers for $suppressedRoles $r")
+                  case Failure(t) => logger.info(s"failed to suppress offers for $suppressedRoles $t")
+                }
+            }
             result.success(SubscribeComplete(frameworkID.getValue))
           } else if (streamId != newStreamId) {
             //TODO: do we need to handle StreamId changes?

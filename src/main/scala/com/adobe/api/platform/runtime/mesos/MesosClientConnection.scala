@@ -23,5 +23,6 @@ trait MesosClientConnection {
   def exec(call: Call): Future[HttpResponse]
   def subscribe(frameworkID: FrameworkID,
                 frameworkName: String,
-                failoverTimeoutSecond: Double): Future[SubscribeComplete]
+                failoverTimeoutSecond: Double,
+                suppressedRoles: Option[Seq[String]] = None): Future[SubscribeComplete]
 }

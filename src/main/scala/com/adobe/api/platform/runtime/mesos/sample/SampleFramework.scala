@@ -52,6 +52,7 @@ object SampleFramework {
         "sample-framework",
         "http://192.168.99.100:5050",
         "sample-role",
+        None,
         30.seconds,
         taskStore = new LocalTaskStore))
 

@@ -72,7 +72,8 @@ class MesosClientTests
 
     override def subscribe(frameworkID: FrameworkID,
                            frameworkName: String,
-                           failoverTimeout: Double): Future[SubscribeComplete] = {
+                           failoverTimeout: Double,
+                           suppressedRoles: Option[Seq[String]] = None): Future[SubscribeComplete] = {
       Future.successful(subscribeCompleteMsg)
     }
   }))
