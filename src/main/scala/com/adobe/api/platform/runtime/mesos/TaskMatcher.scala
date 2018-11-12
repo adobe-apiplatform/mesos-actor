@@ -59,7 +59,7 @@ class DefaultTaskMatcher extends TaskMatcher {
       val agentId = offer.getAgentId.getValue
       if (hasSomePorts && (acceptedOfferAgent == null || acceptedOfferAgent == agentId)) {
         val scalarResources = offer.getResourcesList.asScala
-          .filter(_.getAllocationInfo.getRole == role) //ignore resources with other roles
+          .filter(_.getRole == role) //ignore resources with other roles
           .filter(res => Seq("cpus", "mem", "ports").contains(res.getName))
           .groupBy(_.getName)
           .mapValues(resources => {
