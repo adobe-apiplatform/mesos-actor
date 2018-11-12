@@ -197,14 +197,25 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       tasks.get(taskID.getValue) match {
         case Some(taskDetails) =>
           taskDetails match {
+            case SubmitPending(taskDef, promise) => {
+              log.info(s"deleting unlaunched task ${taskDef.taskId}")
+              tasks.remove(taskDef.taskId)
+            }
+            case Submitted(_, taskInfo: TaskInfo, offer: OfferID, _, _, promise) => {
+              val del = DeletePending(taskId, deletePromise)
+              tasks.update(taskId, del)
+              log.info(s"killing submitted task ${taskID}")
+              kill(taskID, taskInfo.getAgentId)
+            }
             case Running(taskId, _, taskStatus, _, _) => {
               val del = DeletePending(taskId, deletePromise)
               tasks.update(taskId, del)
+              log.info(s"killing running task ${taskID}")
               kill(taskID, taskStatus.getAgentId)
             }
-            case _ => {
-              //TODO: delete tasks in other states
-              log.info("deleting non-running tasks not implemented")
+            case s => {
+              log.info(s"deleting task ${taskID.getValue} in state $s")
+              tasks.remove(taskID.getValue)
             }
           }
 
@@ -371,9 +382,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
                   //dig the hostname out of the offer whose agent id matches the agent id in the task info
                   val hostname =
                     event.getOffersList.asScala.find(p => p.getAgentId == task._1.getAgentId).get.getHostname
-                  log.info(s"updating task ${reqs.taskId} to Submitted")
                   tasks.update(reqs.taskId, Submitted(s, task._1, entry._1, hostname, task._2, promise))
-                  log.info(s"done updating task ${reqs.taskId}")
                 case previousState => log.warning(s"submitted a task that was not in SubmitPending? ${previousState}")
               }
             })
