@@ -31,6 +31,16 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
 
   behavior of "Mesos Default TaskMatcher"
 
+  it should "consider * role as well to match resources" in {
+    val offers = ProtobufUtil.getOffers("/offer_roles.json")
+
+    val tasks = List[TaskDef](TaskDef("taskId", "taskName", "dockerImage:someTag", 0.01, 256, List(8080)))
+    val taskMap =
+      new DefaultTaskMatcher().matchTasksToOffers("whisk", tasks, offers.getOffersList.asScala, new DefaultTaskBuilder())
+
+    taskMap.size shouldBe 1
+
+  }
   it should "only use a single slave per accept" in {
     val offers = ProtobufUtil.getOffers("/offer1.json")
 
