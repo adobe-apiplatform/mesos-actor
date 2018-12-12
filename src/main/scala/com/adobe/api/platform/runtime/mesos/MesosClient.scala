@@ -17,6 +17,7 @@ package com.adobe.api.platform.runtime.mesos
 import akka.actor.Actor
 import akka.actor.ActorLogging
 import akka.actor.ActorSystem
+import akka.actor.Cancellable
 import akka.actor.Props
 import akka.event.LoggingAdapter
 import akka.http.scaladsl.model.HttpResponse
@@ -67,17 +68,26 @@ case object TeardownComplete
 
 case class TaskRecoveryDetail(taskId: String, agentId: String)
 
+case object Heartbeat
+
 //task data
 sealed trait Network
 case object Bridge extends Network
 case object Host extends Network
 case class User(name: String) extends Network
 
+//constraints
 sealed trait Operator
 case object LIKE extends Operator
 case object UNLIKE extends Operator
 
 case class Constraint(attribute: String, operator: Operator, value: String)
+
+//subscription state
+sealed trait FrameworkState
+case object Starting extends FrameworkState //waiting for subscription to start
+case object Subscribed extends FrameworkState //continue checking heartbeats
+case object Exiting extends FrameworkState //do not check heartbeats
 
 case class TaskDef(taskId: String,
                    taskName: String,
@@ -140,6 +150,11 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   val tasks: TaskStore
   val refuseSeconds: Double
   var reconcilationData: mutable.Map[String, ReconcileTaskState] = mutable.Map()
+  var frameworkState: FrameworkState = Starting
+  var heartbeatTimeout: FiniteDuration = 60.seconds //will be reset by Subscribed message
+  val heartbeatMaxFailures: Int
+  var heartbeatMonitor: Option[Cancellable] = None
+  var heartbeatFailures: Int = 0
 
   if (autoSubscribe) {
     log.info(s"auto-subscribing ${self} to mesos master at ${master}")
@@ -231,7 +246,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     case event: Event.Update     => handleUpdate(event)
     case event: Event.Offers     => handleOffers(event)
     case event: Event.Subscribed => handleSubscribed(event)
-    case event: Event            => handleHeartbeat(event)
+    case Heartbeat               => handleHeartbeat()
 
     case msg => log.warning(s"unknown msg: ${msg}")
   }
@@ -399,18 +414,55 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   }
 
   def pending() = tasks.collect { case (_, submitPending: SubmitPending) => submitPending.reqs }
-  def handleHeartbeat(event: Event) = {
-    //TODO: monitor heartbeat
+
+  def handleHeartbeat() = {
+    resetHeartbeatTimeout()
+  }
+
+  def resetHeartbeatTimeout() = {
+    //cancel existing
+    heartbeatMonitor.foreach { monitor =>
+      monitor.cancel()
+      if (heartbeatFailures > 0) {
+        logger.info(s"resetting heartbeat failure counter after ${heartbeatFailures} failures")
+      }
+      heartbeatFailures = 0
+    }
+    if (frameworkState == Subscribed) {
+      heartbeatMonitor = Some(actorSystem.scheduler.scheduleOnce(heartbeatTimeout) {
+        heartbeatFailure()
+      })
+    }
+  }
+
+  def heartbeatFailure(): Unit = {
+    heartbeatFailures += 1
+    logger.warning(s"heartbeat not detected for ${heartbeatTimeout} (${heartbeatFailures} failures)")
+    if (heartbeatFailures >= heartbeatMaxFailures) {
+      logger.warning(s"resubscribing after ${heartbeatFailures} ${heartbeatTimeout} heartbeat failures...")
+      resetHeartbeatTimeout()
+      subscribe(frameworkID, frameworkName, failoverTimeoutSeconds.toSeconds)
+    } else if (frameworkState == Subscribed) {
+      heartbeatMonitor = Some(actorSystem.scheduler.scheduleOnce(heartbeatTimeout) {
+        heartbeatFailure()
+      })
+    }
   }
 
   def handleSubscribed(event: Event.Subscribed) = {
-
-    //TODO: persist to zk...
-    //https://github.com/foursquare/scala-zookeeper-client
-    log.info(s"subscribed; frameworkId is ${event.getFrameworkId} streamId is ${streamId}")
+    frameworkState = Subscribed
+    if (event.hasHeartbeatIntervalSeconds) {
+      heartbeatTimeout = event.getHeartbeatIntervalSeconds.seconds + 2.seconds //allow 2 extra seconds for delayed heartbeat
+    } else {
+      logger.error("no heartbeat interval received during subscribe!")
+    }
+    //TODO: persist framework id if you want to reconcile on restart
+    log.info(s"subscribed; frameworkId is ${event.getFrameworkId.getValue} streamId is ${streamId}")
   }
 
   def teardown(): Future[TeardownComplete.type] = {
+    frameworkState = Exiting
+    heartbeatMonitor.foreach(_.cancel())
     log.info("submitting teardown message...")
     val teardownCall = Call.newBuilder
       .setFrameworkId(frameworkID)
@@ -506,7 +558,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
 
     event.getType match {
       case Event.Type.OFFERS     => self ! event.getOffers
-      case Event.Type.HEARTBEAT  => self ! event
+      case Event.Type.HEARTBEAT  => self ! Heartbeat
       case Event.Type.SUBSCRIBED => self ! event.getSubscribed
       case Event.Type.UPDATE     => self ! event.getUpdate
       case Event.Type.RESCIND =>
@@ -540,7 +592,8 @@ class MesosClient(val id: () => String,
                   val taskBuilder: TaskBuilder,
                   val autoSubscribe: Boolean,
                   val tasks: TaskStore,
-                  val refuseSeconds: Double)
+                  val refuseSeconds: Double,
+                  val heartbeatMaxFailures: Int)
     extends MesosClientActor
     with MesosClientHttpConnection {}
 
@@ -555,7 +608,8 @@ object MesosClient {
             taskBuilder: TaskBuilder = new DefaultTaskBuilder,
             autoSubscribe: Boolean = false,
             taskStore: TaskStore,
-            refuseSeconds: Double = 5.0): Props =
+            refuseSeconds: Double = 5.0,
+            heartbeatMaxFailures: Int = 2): Props =
     Props(
       new MesosClient(
         id,
@@ -567,7 +621,8 @@ object MesosClient {
         taskBuilder,
         autoSubscribe,
         taskStore,
-        refuseSeconds))
+        refuseSeconds,
+        heartbeatMaxFailures))
 
   //TODO: allow task persistence/reconcile
 
