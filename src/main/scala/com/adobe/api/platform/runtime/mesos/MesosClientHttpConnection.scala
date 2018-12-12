@@ -124,8 +124,9 @@ trait MesosClientHttpConnection extends MesosClientConnection {
             streamId = newStreamId
             result.success(SubscribeComplete(frameworkID.getValue))
           } else if (streamId != newStreamId) {
-            //TODO: do we need to handle StreamId changes?
-            logger.warning(s"streamId has changed! ${streamId}  ${newStreamId}")
+            logger.warning(s"streamId has changed from ${streamId} to ${newStreamId}")
+            streamId = newStreamId
+            result.success(SubscribeComplete(frameworkID.getValue))
           }
           Unmarshal(response).to[Source[Event, NotUsed]]
         } else {
