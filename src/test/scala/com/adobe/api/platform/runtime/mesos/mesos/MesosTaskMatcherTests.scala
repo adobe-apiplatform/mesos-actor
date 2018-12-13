@@ -17,6 +17,7 @@ package com.adobe.api.platform.runtime.mesos.mesos
 import akka.actor.ActorSystem
 import akka.event.LoggingAdapter
 import com.adobe.api.platform.runtime.mesos._
+import org.apache.mesos.v1.Protos.Offer
 import org.junit.runner.RunWith
 import org.scalatest.FlatSpec
 import org.scalatest.Matchers
@@ -41,6 +42,30 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
     taskMap.size shouldBe 1
 
   }
+  it should "tolerate incomplete offers (missing cpus)" in {
+    val offers = ProtobufUtil.getOffers("/partialoffer.json")
+
+    val tasks = List[TaskDef](TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(8080)))
+    val taskMap =
+      new DefaultTaskMatcher()
+        .matchTasksToOffers("whisk", tasks, offers.getOffersList.asScala, new DefaultTaskBuilder())
+
+    taskMap.size shouldBe 0
+  }
+
+  it should "tolerate offer logic failures" in {
+    val offers = ProtobufUtil.getOffers("/badoffer.json")
+
+    val tasks = List[TaskDef](TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(8080)))
+    val taskMap =
+      new DefaultTaskMatcher(badOffer)
+        .matchTasksToOffers("*", tasks, offers.getOffersList.asScala, new DefaultTaskBuilder())
+
+    taskMap.size shouldBe 0
+  }
+
+  def badOffer(offer: Offer) =
+    !offer.getAttributesList.asScala.exists(a => a.getName == "ethos_role" && a.getText.getValue == "bad")
   it should "not use an offer if the number of required ports are not available" in {
     val offers = ProtobufUtil.getOffers("/offer-noports.json")
 

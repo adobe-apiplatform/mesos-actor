@@ -1,0 +1,69 @@
+{
+  "offers": [{
+    "id": {
+      "value": "713a03c1-76e6-46b1-9f7c-4919db6ce1a4-O297332"
+    },
+    "frameworkId": {
+      "value": "whisk-containerfactory-89d6dd03-3b1a-4d12-96dd-033b1a0d1251"
+    },
+    "agentId": {
+      "value": "713a03c1-76e6-46b1-9f7c-4919db6ce1a4-S16"
+    },
+    "hostname": "10.250.200.217",
+    "resources": [{
+      "name": "ports",
+      "type": "RANGES",
+      "ranges": {
+        "range": [{
+          "begin": "10039",
+          "end": "10040"
+        }]
+      },
+      "role": "whisk",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }, {
+      "name": "mem",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 256.0
+      },
+      "role": "whisk",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }],
+    "attributes": [{
+      "name": "ethos_role",
+      "type": "TEXT",
+      "text": {
+        "value": "worker_action"
+      }
+    }, {
+      "name": "zone",
+      "type": "TEXT",
+      "text": {
+        "value": "us-east-1c"
+      }
+    }, {
+      "name": "provider",
+      "type": "TEXT",
+      "text": {
+        "value": "aws"
+      }
+    }],
+    "url": {
+      "scheme": "http",
+      "address": {
+        "hostname": "10.250.200.217",
+        "ip": "10.250.200.217",
+        "port": 5051
+      },
+      "path": "/slave(1)"
+    },
+    "allocationInfo": {
+      "role": "whisk"
+    }
+  }]
+}

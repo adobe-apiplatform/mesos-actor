@@ -1,0 +1,298 @@
+{
+  "offers": [{
+    "id": {
+      "value": "713a03c1-76e6-46b1-9f7c-4919db6ce1a4-O297333"
+    },
+    "frameworkId": {
+      "value": "whisk-containerfactory-89d6dd03-3b1a-4d12-96dd-033b1a0d1251"
+    },
+    "agentId": {
+      "value": "713a03c1-76e6-46b1-9f7c-4919db6ce1a4-S1"
+    },
+    "hostname": "10.250.197.228",
+    "resources": [{
+      "name": "ports",
+      "type": "RANGES",
+      "ranges": {
+        "range": [{
+          "begin": "1025",
+          "end": "2041"
+        }, {
+          "begin": "2043",
+          "end": "2049"
+        }, {
+          "begin": "2100",
+          "end": "2180"
+        }, {
+          "begin": "2182",
+          "end": "2381"
+        }, {
+          "begin": "2383",
+          "end": "3887"
+        }, {
+          "begin": "3889",
+          "end": "5049"
+        }, {
+          "begin": "5052",
+          "end": "5139"
+        }, {
+          "begin": "5141",
+          "end": "5169"
+        }, {
+          "begin": "5171",
+          "end": "8079"
+        }, {
+          "begin": "8082",
+          "end": "8180"
+        }, {
+          "begin": "8182",
+          "end": "9091"
+        }, {
+          "begin": "9093",
+          "end": "9099"
+        }, {
+          "begin": "9151",
+          "end": "24219"
+        }, {
+          "begin": "24225",
+          "end": "24231"
+        }, {
+          "begin": "24236",
+          "end": "27755"
+        }, {
+          "begin": "27757",
+          "end": "32000"
+        }]
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }, {
+      "name": "cpus",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 2.9
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }, {
+      "name": "mem",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 5002.0
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }, {
+      "name": "disk",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 37121.0
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }],
+    "attributes": [{
+      "name": "ethos_role",
+      "type": "TEXT",
+      "text": {
+        "value": "bad"
+      }
+    }, {
+      "name": "zone",
+      "type": "TEXT",
+      "text": {
+        "value": "us-east-1b"
+      }
+    }, {
+      "name": "provider",
+      "type": "TEXT",
+      "text": {
+        "value": "aws"
+      }
+    }],
+    "url": {
+      "scheme": "http",
+      "address": {
+        "hostname": "10.250.197.228",
+        "ip": "10.250.197.228",
+        "port": 5051
+      },
+      "path": "/slave(1)"
+    },
+    "allocationInfo": {
+      "role": "whisk"
+    }
+  }, {
+    "id": {
+      "value": "713a03c1-76e6-46b1-9f7c-4919db6ce1a4-O297334"
+    },
+    "frameworkId": {
+      "value": "whisk-containerfactory-89d6dd03-3b1a-4d12-96dd-033b1a0d1251"
+    },
+    "agentId": {
+      "value": "713a03c1-76e6-46b1-9f7c-4919db6ce1a4-S12"
+    },
+    "hostname": "10.250.198.228",
+    "resources": [{
+      "name": "mem",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 42706.0
+      },
+      "role": "whisk",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }, {
+      "name": "cpus",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 33.933
+      },
+      "role": "whisk",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }, {
+      "name": "ports",
+      "type": "RANGES",
+      "ranges": {
+        "range": [{
+          "begin": "10016",
+          "end": "10017"
+        }, {
+          "begin": "10040",
+          "end": "10199"
+        }]
+      },
+      "role": "whisk",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }, {
+      "name": "mem",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 2560.0
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }, {
+      "name": "cpus",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 0.9
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }, {
+      "name": "ports",
+      "type": "RANGES",
+      "ranges": {
+        "range": [{
+          "begin": "1025",
+          "end": "2041"
+        }, {
+          "begin": "2043",
+          "end": "2049"
+        }, {
+          "begin": "2100",
+          "end": "2180"
+        }, {
+          "begin": "2182",
+          "end": "3887"
+        }, {
+          "begin": "3889",
+          "end": "5049"
+        }, {
+          "begin": "5052",
+          "end": "5139"
+        }, {
+          "begin": "5141",
+          "end": "5169"
+        }, {
+          "begin": "5171",
+          "end": "8079"
+        }, {
+          "begin": "8082",
+          "end": "8180"
+        }, {
+          "begin": "8182",
+          "end": "9099"
+        }, {
+          "begin": "9151",
+          "end": "12755"
+        }, {
+          "begin": "12757",
+          "end": "24219"
+        }, {
+          "begin": "24225",
+          "end": "24231"
+        }, {
+          "begin": "24236",
+          "end": "28043"
+        }, {
+          "begin": "28045",
+          "end": "32000"
+        }]
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }, {
+      "name": "disk",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 42121.0
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "whisk"
+      }
+    }],
+    "attributes": [{
+      "name": "ethos_role",
+      "type": "TEXT",
+      "text": {
+        "value": "bad"
+      }
+    }, {
+      "name": "zone",
+      "type": "TEXT",
+      "text": {
+        "value": "us-east-1b"
+      }
+    }, {
+      "name": "provider",
+      "type": "TEXT",
+      "text": {
+        "value": "aws"
+      }
+    }],
+    "url": {
+      "scheme": "http",
+      "address": {
+        "hostname": "10.250.198.228",
+        "ip": "10.250.198.228",
+        "port": 5051
+      },
+      "path": "/slave(1)"
+    },
+    "allocationInfo": {
+      "role": "whisk"
+    }
+  }]
+}
