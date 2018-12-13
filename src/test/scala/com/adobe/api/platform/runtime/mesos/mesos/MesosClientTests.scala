@@ -16,7 +16,6 @@ package com.adobe.api.platform.runtime.mesos.mesos
 
 import akka.actor.ActorSystem
 import akka.actor.Props
-import akka.cluster.Cluster
 import akka.http.scaladsl.model.HttpResponse
 import akka.http.scaladsl.model.StatusCodes
 import akka.pattern.ask
@@ -30,13 +29,14 @@ import org.apache.mesos.v1.Protos.TaskID
 import org.apache.mesos.v1.Protos.TaskState
 import org.apache.mesos.v1.Protos.TaskStatus
 import org.apache.mesos.v1.scheduler.Protos.Call
+import org.junit.runner.RunWith
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.Matchers
 import org.scalatest.WordSpecLike
-
+import org.scalatest.junit.JUnitRunner
 import scala.concurrent.Future
 import scala.concurrent.duration._
-
+@RunWith(classOf[JUnitRunner])
 class MesosClientTests
     extends TestKit(ActorSystem("MySpec"))
     with ImplicitSender
@@ -49,34 +49,10 @@ class MesosClientTests
   }
 
   val subscribeCompleteMsg = SubscribeComplete("someid")
-  val mesosClient = system.actorOf(Props(new MesosClientActor with MesosClientConnection {
-    override val id = () => "testid"
-    override val frameworkName: String = "testframework"
-    override val master: String = "none"
-    override val role: String = "*"
-    override val taskMatcher: TaskMatcher = new DefaultTaskMatcher()
-    override val taskBuilder: TaskBuilder = new DefaultTaskBuilder()
-    override val failoverTimeoutSeconds = 0.seconds
-    override val autoSubscribe: Boolean = false
-    override val tasks: TaskStore = new LocalTaskStore
-    override val refuseSeconds: Double = 1.0
-    override val heartbeatMaxFailures: Int = 2
-
-    override def exec(call: Call): Future[HttpResponse] = {
-      log.info(s"sending ${call.getType}")
-      call.getType match {
-        case Call.Type.ACCEPT =>
-          Future.successful(HttpResponse(StatusCodes.OK)).andThen { case r => sender() ! "ACCEPT_SENT" }
-        case _ => Future.failed(new Exception(s"unhandled call type ${call.getType}"))
-      }
-    }
-
-    override def subscribe(frameworkID: FrameworkID,
-                           frameworkName: String,
-                           failoverTimeout: Double): Future[SubscribeComplete] = {
-      Future.successful(subscribeCompleteMsg)
-    }
-  }))
+  val id = () => {
+    "testid"
+  }
+  val mesosClient = system.actorOf(Props(new TestMesosClientActor(id)))
 
   "An MesosClientActor actor" must {
 
@@ -172,6 +148,34 @@ class MesosClientTests
 
     }
 
+  }
+  class TestMesosClientActor(override val id: () => String) extends MesosClientActor() with MesosClientConnection {
+
+    override val frameworkName: String = "testframework"
+    override val master: String = "none"
+    override val role: String = "*"
+    override val taskMatcher: TaskMatcher = new DefaultTaskMatcher()
+    override val taskBuilder: TaskBuilder = new DefaultTaskBuilder()
+    override val failoverTimeoutSeconds = 0.seconds
+    override val autoSubscribe: Boolean = false
+    override val tasks: TaskStore = new LocalTaskStore
+    override val refuseSeconds: Double = 1.0
+    override val heartbeatMaxFailures: Int = 2
+
+    override def exec(call: Call): Future[HttpResponse] = {
+      log.info(s"sending ${call.getType}")
+      call.getType match {
+        case Call.Type.ACCEPT =>
+          Future.successful(HttpResponse(StatusCodes.OK)).andThen { case r => sender() ! "ACCEPT_SENT" }
+        case _ => Future.failed(new Exception(s"unhandled call type ${call.getType}"))
+      }
+    }
+
+    override def subscribe(frameworkID: FrameworkID,
+                           frameworkName: String,
+                           failoverTimeout: Double): Future[SubscribeComplete] = {
+      Future.successful(subscribeCompleteMsg)
+    }
   }
 
 }
