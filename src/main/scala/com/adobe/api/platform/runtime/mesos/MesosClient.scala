@@ -150,7 +150,6 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   val tasks: TaskStore
   val refuseSeconds: Double
   var reconcilationData: mutable.Map[String, ReconcileTaskState] = mutable.Map()
-  var frameworkState: FrameworkState = Starting
   var heartbeatTimeout: FiniteDuration = 60.seconds //will be reset by Subscribed message
   val heartbeatMaxFailures: Int
   var heartbeatMonitor: Option[Cancellable] = None
@@ -177,7 +176,9 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       })
   }
 
-  private val frameworkID = FrameworkID.newBuilder().setValue(id()).build();
+  //cache the framework id, so that in case this actor restarts we can reconnect
+  if (MesosClient.frameworkID.isEmpty) MesosClient.frameworkID = Some(FrameworkID.newBuilder().setValue(id()).build())
+  private val frameworkID = MesosClient.frameworkID.get
 
   //TODO: handle redirect to master see https://github.com/mesosphere/mesos-rxjava/blob/d6fd040af3322552012fb3dcf61debb9886adbf3/mesos-rxjava-client/src/main/java/com/mesosphere/mesos/rx/java/MesosClient.java#L167
   val mesosUri = URI.create(s"${master}/api/v1/scheduler")
@@ -349,6 +350,23 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     }
   }
 
+  override def postStop(): Unit = {
+    logger.info("postStop cancelling heartbeatMonitor")
+    heartbeatMonitor.foreach(_.cancel())
+    super.postStop()
+  }
+  override def preRestart(reason: Throwable, message: Option[Any]): Unit = {
+    logger.warning(s"preRestart restarting ${frameworkID.getValue} after $reason from message $message")
+    super.preRestart(reason, message)
+  }
+  override def postRestart(reason: Throwable): Unit = {
+    if (MesosClient.frameworkState == Subscribed) {
+      logger.warning(s"postRestart resubscribing ${frameworkID.getValue} after $reason")
+      subscribe(frameworkID, frameworkName, failoverTimeoutSeconds.toSeconds)
+    }
+    super.postRestart(reason)
+  }
+
   def handleOffers(event: Event.Offers) = {
 
     log.info(s"received ${event.getOffersList.size} offers: ${toCompactJsonString(event);}")
@@ -428,7 +446,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       }
       heartbeatFailures = 0
     }
-    if (frameworkState == Subscribed) {
+    if (MesosClient.frameworkState == Subscribed) {
       heartbeatMonitor = Some(actorSystem.scheduler.scheduleOnce(heartbeatTimeout) {
         heartbeatFailure()
       })
@@ -442,7 +460,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       logger.warning(s"resubscribing after ${heartbeatFailures} ${heartbeatTimeout} heartbeat failures...")
       resetHeartbeatTimeout()
       subscribe(frameworkID, frameworkName, failoverTimeoutSeconds.toSeconds)
-    } else if (frameworkState == Subscribed) {
+    } else if (MesosClient.frameworkState == Subscribed) {
       heartbeatMonitor = Some(actorSystem.scheduler.scheduleOnce(heartbeatTimeout) {
         heartbeatFailure()
       })
@@ -450,7 +468,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   }
 
   def handleSubscribed(event: Event.Subscribed) = {
-    frameworkState = Subscribed
+    MesosClient.frameworkState = Subscribed
     if (event.hasHeartbeatIntervalSeconds) {
       heartbeatTimeout = event.getHeartbeatIntervalSeconds.seconds + 2.seconds //allow 2 extra seconds for delayed heartbeat
     } else {
@@ -461,7 +479,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   }
 
   def teardown(): Future[TeardownComplete.type] = {
-    frameworkState = Exiting
+    MesosClient.frameworkState = Exiting
     heartbeatMonitor.foreach(_.cancel())
     log.info("submitting teardown message...")
     val teardownCall = Call.newBuilder
@@ -598,6 +616,8 @@ class MesosClient(val id: () => String,
     with MesosClientHttpConnection {}
 
 object MesosClient {
+  protected[mesos] var frameworkID: Option[FrameworkID] = None
+  protected[mesos] var frameworkState: FrameworkState = Starting
 
   def props(id: () => String,
             frameworkName: String,

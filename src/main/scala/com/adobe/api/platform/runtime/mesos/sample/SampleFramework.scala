@@ -51,7 +51,7 @@ object SampleFramework {
         () => "sample-" + UUID.randomUUID(),
         "sample-framework",
         "http://192.168.99.100:5050",
-        "sample-role",
+        "*",
         30.seconds,
         taskStore = new LocalTaskStore))
 
@@ -77,7 +77,8 @@ object SampleFramework {
         0.1,
         24,
         List(8080, 8081),
-        Some(HealthCheckConfig(0)))
+        Some(HealthCheckConfig(0)),
+        commandDef = Some(CommandDef()))
       val launched: Future[TaskState] = mesosClientActor.ask(SubmitTask(task))(taskLaunchTimeout).mapTo[TaskState]
       launched map {
         case taskDetails: Running => {
