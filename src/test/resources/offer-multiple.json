@@ -37,7 +37,7 @@
       "name": "mem",
       "type": "SCALAR",
       "scalar": {
-        "value": 2902.0
+        "value": 2912.0
       },
       "role": "*",
       "allocationInfo": {
