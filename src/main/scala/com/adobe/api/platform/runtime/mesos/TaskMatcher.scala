@@ -181,7 +181,7 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
         }
 
       } catch {
-        case t => logger.error(s"task matching failed, ignoring offer ${offer.getId} ${t}")
+        case t: Exception => logger.error(s"task matching failed, ignoring offer ${offer.getId} ${t}")
       }
     })
     result
