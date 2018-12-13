@@ -132,7 +132,7 @@ case class Running(taskId: String,
     extends TaskState
 case class DeletePending(taskId: String, promise: Promise[Deleted]) extends TaskState
 case class Deleted(taskId: String, taskStatus: TaskStatus) extends TaskState
-case class Failed(taskId: String, agentId:String) extends TaskState
+case class Failed(taskId: String, agentId: String) extends TaskState
 
 //TODO: mesos authentication
 trait MesosClientActor extends Actor with ActorLogging with MesosClientConnection {
