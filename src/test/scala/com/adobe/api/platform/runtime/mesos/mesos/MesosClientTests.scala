@@ -52,11 +52,11 @@ class MesosClientTests
   val id = () => {
     "testid"
   }
-  val mesosClient = system.actorOf(Props(new TestMesosClientActor(id)))
 
   "An MesosClientActor actor" must {
 
     "launch submitted tasks to RUNNING (+ healthy) after offers are received" in {
+      val mesosClient = system.actorOf(Props(new TestMesosClientActor(id)))
 
       //subscribe
       mesosClient ! Subscribe
@@ -141,13 +141,30 @@ class MesosClientTests
         .setAgentId(agentId)
         .setHealthy(true)
         .build()
-      val runningTaskInfo = ProtobufUtil.getTaskInfo("/taskdetails.json")
+//      val runningTaskInfo = ProtobufUtil.getTaskInfo("/taskdetails.json")
       val expectedTaskDetails = Running("taskId1", agentId.getValue, runningTaskStatus, "192.168.99.100", List(11001))
 
       expectMsg(expectedTaskDetails)
 
-    }
 
+      mesosClient ! org.apache.mesos.v1.scheduler.Protos.Event.Update
+        .newBuilder()
+        .setStatus(
+          TaskStatus
+            .newBuilder()
+            .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+            .setState(TaskState.TASK_FAILED)
+            .setAgentId(agentId)
+            .setHealthy(false)
+            .build())
+        .build()
+
+      val failedTaskDetails = Failed("taskId1", agentId.getValue)
+
+      expectMsg(failedTaskDetails)
+
+
+    }
   }
   class TestMesosClientActor(override val id: () => String) extends MesosClientActor() with MesosClientConnection {
 

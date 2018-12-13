@@ -35,11 +35,12 @@ import org.apache.mesos.v1.Protos.OfferID
 import org.apache.mesos.v1.Protos.TaskID
 import org.apache.mesos.v1.Protos.TaskInfo
 import org.apache.mesos.v1.Protos.TaskStatus
-import org.apache.mesos.v1.Protos.TaskStatus.Reason
 import org.apache.mesos.v1.Protos.{TaskState => MesosTaskState}
+import org.apache.mesos.v1.Protos.TaskStatus.Reason
 import org.apache.mesos.v1.scheduler.Protos.Call
 import org.apache.mesos.v1.scheduler.Protos.Call._
 import org.apache.mesos.v1.scheduler.Protos.Event
+
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
@@ -131,6 +132,7 @@ case class Running(taskId: String,
     extends TaskState
 case class DeletePending(taskId: String, promise: Promise[Deleted]) extends TaskState
 case class Deleted(taskId: String, taskStatus: TaskStatus) extends TaskState
+case class Failed(taskId: String, agentId:String) extends TaskState
 
 //TODO: mesos authentication
 trait MesosClientActor extends Actor with ActorLogging with MesosClientConnection {
@@ -285,7 +287,16 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         log.info(
           s"task ${event.getStatus.getTaskId.getValue} changed from TASK_RUNNING to ${toCompactJsonString(event.getStatus)}")
         //TODO: handle TASK_LOST, etc here
-        tasks.update(event.getStatus.getTaskId.getValue, r)
+        event.getStatus.getState match {
+          case MesosTaskState.TASK_FAILED | MesosTaskState.TASK_DROPPED | MesosTaskState.TASK_GONE => {
+            // This doesn't seem right..... seems like there should be another mechanism to signal more like the promise resolution above
+            sender() ! Failed(taskId, event.getStatus.getAgentId.getValue)
+            tasks.update(taskId, Failed(taskId, event.getStatus.getAgentId.getValue))
+          }
+          case _ => {
+            tasks.update(event.getStatus.getTaskId.getValue, r)
+          }
+        }
       }
       case Some(DeletePending(taskInfo, promise)) => {
         event.getStatus.getState match {
