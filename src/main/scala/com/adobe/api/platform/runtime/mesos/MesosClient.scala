@@ -40,7 +40,6 @@ import org.apache.mesos.v1.Protos.TaskStatus.Reason
 import org.apache.mesos.v1.scheduler.Protos.Call
 import org.apache.mesos.v1.scheduler.Protos.Call._
 import org.apache.mesos.v1.scheduler.Protos.Event
-
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
@@ -222,13 +221,13 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
             case Submitted(_, taskInfo: TaskInfo, offer: OfferID, _, _, promise) => {
               val del = DeletePending(taskId, deletePromise)
               tasks.update(taskId, del)
-              log.info(s"killing submitted task ${taskID}")
+              log.info(s"killing submitted task ${taskID.getValue}")
               kill(taskID, taskInfo.getAgentId)
             }
             case Running(taskId, _, taskStatus, _, _) => {
               val del = DeletePending(taskId, deletePromise)
               tasks.update(taskId, del)
-              log.info(s"killing running task ${taskID}")
+              log.info(s"killing running task ${taskID.getValue}")
               kill(taskID, taskStatus.getAgentId)
             }
             case s => {
@@ -238,7 +237,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
           }
 
         case None =>
-          deletePromise.failure(new Exception(s"no task was running with id ${taskId}"))
+          deletePromise.failure(new MesosException(s"no task was running with id ${taskId}"))
       }
       deletePromise.future.pipeTo(sender())
     }
@@ -256,10 +255,10 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
 
   def handleUpdate(event: Event.Update) = {
     val taskId = event.getStatus.getTaskId.getValue
-    log.info(s"received update for task ${event.getStatus.getTaskId.getValue} in state ${event.getStatus.getState}")
-
-    //TODO: handle case of unknown task?
     val oldTaskDetails = tasks.get(taskId)
+    log.info(
+      s"received update for task ${event.getStatus.getTaskId.getValue} in state ${event.getStatus.getState} with previous state ${oldTaskDetails
+        .map(_.getClass)}")
 
     oldTaskDetails match {
       case Some(Submitted(_, taskInfo, _, hostname, hostports, promise)) => {
@@ -280,20 +279,23 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
           case _ =>
             log.warning(s"failing task ${event.getStatus.getTaskId.getValue}  msg: ${event.getStatus.getMessage}")
             promise.failure(
-              new Exception(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
+              new MesosException(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
         }
       }
       case Some(r: Running) => {
-        log.info(
-          s"task ${event.getStatus.getTaskId.getValue} changed from TASK_RUNNING to ${toCompactJsonString(event.getStatus)}")
-        //TODO: handle TASK_LOST, etc here
         event.getStatus.getState match {
-          case MesosTaskState.TASK_FAILED | MesosTaskState.TASK_DROPPED | MesosTaskState.TASK_GONE => {
-            // This doesn't seem right..... seems like there should be another mechanism to signal more like the promise resolution above
-            sender() ! Failed(taskId, event.getStatus.getAgentId.getValue)
-            tasks.update(taskId, Failed(taskId, event.getStatus.getAgentId.getValue))
+          case MesosTaskState.TASK_FAILED | MesosTaskState.TASK_DROPPED | MesosTaskState.TASK_GONE |
+              MesosTaskState.TASK_KILLED | MesosTaskState.TASK_LOST => {
+            log.error(
+              s"task ${event.getStatus.getTaskId.getValue} unexpectedly changed from TASK_RUNNING to ${toCompactJsonString(
+                event.getStatus)}")
+            val listener = sender() //TODO: allow client to provide the listener
+            listener ! Failed(taskId, event.getStatus.getAgentId.getValue)
+            tasks.remove(taskId)
           }
           case _ => {
+            log.info(
+              s"task ${event.getStatus.getTaskId.getValue} changed from TASK_RUNNING to ${toCompactJsonString(event.getStatus)}")
             tasks.update(event.getStatus.getTaskId.getValue, r)
           }
         }
@@ -301,16 +303,19 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       case Some(DeletePending(taskInfo, promise)) => {
         event.getStatus.getState match {
           case MesosTaskState.TASK_KILLED =>
+            log.info(s"successfully killed task ${event.getStatus.getTaskId.getValue}")
             promise.success(Deleted(taskId, event.getStatus))
             tasks.remove(taskId)
           case MesosTaskState.TASK_RUNNING | MesosTaskState.TASK_KILLING | MesosTaskState.TASK_STAGING |
               MesosTaskState.TASK_STARTING =>
-            log.info(
-              s"task still killing task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
+            log.info(s"still killing task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
           case _ =>
+            log.warning(
+              s"task ended in unexpected state ${event.getStatus.getState} msg: ${toCompactJsonString(event)}")
             promise.failure(
-              new Exception(
-                s"task ended in unexpected state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
+              new MesosException(
+                s"task ended in unexpected state ${event.getStatus.getState} msg: ${toCompactJsonString(event)}"))
+            tasks.remove(taskId)
         }
       }
       case None if event.getStatus.getReason == Reason.REASON_RECONCILIATION => {
@@ -333,10 +338,11 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
           case _ => log.info(s"mesos-actor does not currently reconcile tasks in state ${event.getStatus.getState}")
         }
       }
-
+      case None =>
+        log.warning(s"received update for unknown task ${toCompactJsonString(event)}")
       case _ =>
-        log.warning(s"unexpected task status ${oldTaskDetails} for update event ${event}")
-        tasks.foreach(t => log.info(s"      ${t}"))
+        log.warning(s"unexpected task status ${oldTaskDetails} for update event ${toCompactJsonString(event)}")
+        tasks.foreach(t => log.debug(s"      ${t}"))
 
     }
     acknowledge(event.getStatus)
@@ -575,7 +581,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       if (!resp.status.isSuccess()) {
         //log and fail the future if response was not "successful"
         log.error(s"http request of type ${call.getType} returned non-successful status ${resp}")
-        Future.failed(new Exception("not successful"))
+        Future.failed(new MesosException("not successful"))
       } else {
         Future.successful(resp)
       }
