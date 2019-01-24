@@ -23,6 +23,7 @@ import akka.testkit.ImplicitSender
 import akka.testkit.TestKit
 import akka.util.Timeout
 import com.adobe.api.platform.runtime.mesos._
+import java.time.Instant
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.Protos.TaskID
@@ -87,6 +88,16 @@ class MesosClientTests
 
     //verify that ACCEPT was sent
     expectMsg("ACCEPT_SENT")
+
+    //verify agentOfferHistory
+    MesosClient.agentOfferHistory.size shouldBe 3
+    MesosClient.agentOfferHistory.keys shouldBe Set("192.168.99.100", "192.168.99.101", "192.168.99.102")
+    MesosClient.agentOfferHistory.foreach(_ match {
+      case (_, AgentStats(mem, cpus, _)) =>
+        mem shouldBe 2902.0
+        cpus shouldBe 0.9
+    })
+
     //wait for post accept
 
     val agentId = AgentID
