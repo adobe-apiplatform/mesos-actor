@@ -24,6 +24,7 @@ import akka.http.scaladsl.model.HttpResponse
 import akka.pattern.ask
 import akka.pattern.pipe
 import akka.util.Timeout
+import com.adobe.api.platform.runtime.mesos.MesosClient.agentOfferHistory
 import com.google.protobuf.util.JsonFormat
 import java.net.URI
 import java.time.Instant
@@ -158,7 +159,6 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   val heartbeatMaxFailures: Int
   var heartbeatMonitor: Option[Cancellable] = None
   var heartbeatFailures: Int = 0
-  var agentOfferHistory = Map.empty[String, AgentStats] //track the most recent offer stats per agent
 
   if (autoSubscribe) {
     log.info(s"auto-subscribing ${self} to mesos master at ${master}")
@@ -393,7 +393,8 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     log.info(s"received ${event.getOffersList.size} offers: ${toCompactJsonString(event);}")
 
     //store a reference of last memory offer (total) from each agent
-    updateAgentStats(event)
+    MesosClient.updateAgentStats(role, event)
+    log.info(s"agent offer stats: ${agentOfferHistory}")
 
     val matchedTasks = taskMatcher.matchTasksToOffers(role, pending, event.getOffersList.asScala.toList, taskBuilder)
 
@@ -459,27 +460,6 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   }
 
   def leastUsedAgent() = agentOfferHistory.toList.maxBy(_._2.mem)._1 //return agent with largest offer < 3min old
-
-  def updateAgentStats(offers: Event.Offers) = {
-    val newOfferStats = offers.getOffersList.asScala
-      .filter(_.getResourcesList.asScala.exists(_.getRole == role)) //only include agents with offers that include resources for this role
-      .map(o =>
-        o.getHostname -> AgentStats(
-          o.getResourcesList.asScala
-            .filter(r => r.getRole == role && r.getName == "mem")
-            .foldLeft(0.0)(_ + _.getScalar.getValue),
-          o.getResourcesList.asScala
-            .filter(r => r.getRole == role && r.getName == "cpus")
-            .foldLeft(0.0)(_ + _.getScalar.getValue),
-          Instant.now()))
-
-    log.debug(s"new agent offer stats: ${newOfferStats}")
-    agentOfferHistory = agentOfferHistory ++ newOfferStats
-    log.info(s"agent offer stats: ${agentOfferHistory}")
-
-    //prune stats that are > 3min old
-    agentOfferHistory = agentOfferHistory.filter(_._2.lastSeen.isAfter(Instant.now().minusSeconds(180)))
-  }
 
   def pending() = tasks.collect { case (_, submitPending: SubmitPending) => submitPending.reqs }
 
@@ -668,6 +648,7 @@ class MesosClient(val id: () => String,
 object MesosClient {
   protected[mesos] var frameworkID: Option[FrameworkID] = None
   protected[mesos] var frameworkState: FrameworkState = Starting
+  var agentOfferHistory = Map.empty[String, AgentStats] //track the most recent offer stats per agent
 
   def props(id: () => String,
             frameworkName: String,
@@ -711,5 +692,22 @@ object MesosClient {
               .setLaunch(Offer.Operation.Launch.newBuilder
                 .addAllTaskInfos(tasks))))
       .build
+  def updateAgentStats(role: String, offers: Event.Offers) = {
+    val newOfferStats = offers.getOffersList.asScala
+      .filter(_.getResourcesList.asScala.exists(_.getRole == role)) //only include agents with offers that include resources for this role
+      .map(o =>
+        o.getHostname -> AgentStats(
+          o.getResourcesList.asScala
+            .filter(r => r.getRole == role && r.getName == "mem")
+            .foldLeft(0.0)(_ + _.getScalar.getValue),
+          o.getResourcesList.asScala
+            .filter(r => r.getRole == role && r.getName == "cpus")
+            .foldLeft(0.0)(_ + _.getScalar.getValue),
+          Instant.now()))
 
+    agentOfferHistory = agentOfferHistory ++ newOfferStats
+
+    //prune stats that are > 3min old
+    agentOfferHistory = agentOfferHistory.filter(_._2.lastSeen.isAfter(Instant.now().minusSeconds(180)))
+  }
 }
