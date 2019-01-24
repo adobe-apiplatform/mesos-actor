@@ -26,6 +26,7 @@ import akka.pattern.pipe
 import akka.util.Timeout
 import com.google.protobuf.util.JsonFormat
 import java.net.URI
+import java.time.Instant
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.ExecutorID
 import org.apache.mesos.v1.Protos.Filters
@@ -133,6 +134,8 @@ case class DeletePending(taskId: String, promise: Promise[Deleted]) extends Task
 case class Deleted(taskId: String, taskStatus: TaskStatus) extends TaskState
 case class Failed(taskId: String, agentId: String) extends TaskState
 
+case class AgentStats(mem: Double, cpu: Double, lastSeen: Instant)
+
 //TODO: mesos authentication
 trait MesosClientActor extends Actor with ActorLogging with MesosClientConnection {
   implicit val ec: ExecutionContext = context.dispatcher
@@ -155,6 +158,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   val heartbeatMaxFailures: Int
   var heartbeatMonitor: Option[Cancellable] = None
   var heartbeatFailures: Int = 0
+  var agentOfferHistory = Map.empty[String, AgentStats] //track the most recent offer stats per agent
 
   if (autoSubscribe) {
     log.info(s"auto-subscribing ${self} to mesos master at ${master}")
@@ -388,15 +392,19 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
 
     log.info(s"received ${event.getOffersList.size} offers: ${toCompactJsonString(event);}")
 
+    //store a reference of last memory offer (total) from each agent
+    updateAgentStats(event)
+
     val matchedTasks = taskMatcher.matchTasksToOffers(role, pending, event.getOffersList.asScala.toList, taskBuilder)
 
     val matchedCount = matchedTasks.foldLeft(0)(_ + _._2.size)
-    log.info(s"matched ${matchedCount} tasks out of ${pending.size} pending tasks")
+    log.info(s"matched ${matchedCount} tasks to ${matchedTasks.size} offers out of ${pending.size} pending tasks")
     pending.foreach(reqs => {
       log.debug(s"pending task: ${reqs.taskId}")
     })
-    matchedTasks.values.foreach(taskInfos => {
-      taskInfos.foreach(taskInfo => {
+    matchedTasks.foreach(taskInfos => {
+      log.debug(s"using offer ${taskInfos._1.getValue}")
+      taskInfos._2.foreach(taskInfo => {
         log.debug(s"     matched task: ${taskInfo._1.getTaskId.getValue}")
       })
     })
@@ -419,33 +427,58 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       execInternal(declineCall)
 
     } else {
+      matchedTasks.foreach { offerTasks =>
+        val taskInfos: java.lang.Iterable[TaskInfo] = offerTasks._2.map(_._1).asJava
+        val acceptCall = MesosClient.accept(frameworkID, Seq(offerTasks._1).asJava, taskInfos)
+        execInternal(acceptCall).onComplete {
+          case Success(r) =>
+            matchedTasks.foreach(entry => {
+              entry._2.foreach(task => {
+                tasks(task._1.getTaskId.getValue) match {
+                  case s @ SubmitPending(reqs, promise) =>
+                    //dig the hostname out of the offer whose agent id matches the agent id in the task info
+                    val hostname =
+                      event.getOffersList.asScala.find(p => p.getAgentId == task._1.getAgentId).get.getHostname
+                    tasks.update(reqs.taskId, Submitted(s, task._1, entry._1, hostname, task._2, promise))
+                  case previousState =>
+                    log.warning(s"submitted a task that was not in SubmitPending? ${previousState}")
+                }
+              })
 
-      val taskInfos: java.lang.Iterable[TaskInfo] = matchedTasks.map(_._2.map(_._1)).flatten.asJava
-      val acceptCall = MesosClient.accept(frameworkID, matchedTasks.keys.asJava, taskInfos)
-
-      execInternal(acceptCall).onComplete {
-        case Success(r) =>
-          matchedTasks.foreach(entry => {
-            entry._2.foreach(task => {
-              tasks(task._1.getTaskId.getValue) match {
-                case s @ SubmitPending(reqs, promise) =>
-                  //dig the hostname out of the offer whose agent id matches the agent id in the task info
-                  val hostname =
-                    event.getOffersList.asScala.find(p => p.getAgentId == task._1.getAgentId).get.getHostname
-                  tasks.update(reqs.taskId, Submitted(s, task._1, entry._1, hostname, task._2, promise))
-                case previousState => log.warning(s"submitted a task that was not in SubmitPending? ${previousState}")
-              }
             })
+            if (!pending.isEmpty) {
+              log.warning("still have pending tasks after OFFER + ACCEPT: ")
+              pending.foreach(t => log.info(s"pending taskid ${t.taskId}"))
+            }
+          case Failure(t) => log.error(s"failure ${t}")
+        }
 
-          })
-          if (!pending.isEmpty) {
-            log.warning("still have pending tasks after OFFER + ACCEPT: ")
-            pending.foreach(t => log.info(s"pending taskid ${t.taskId}"))
-          }
-        case Failure(t) => log.error(s"failure ${t}")
       }
-    }
 
+    }
+  }
+
+  def leastUsedAgent() = agentOfferHistory.toList.maxBy(_._2.mem)._1 //return agent with largest offer < 3min old
+
+  def updateAgentStats(offers: Event.Offers) = {
+    val newOfferStats = offers.getOffersList.asScala
+      .filter(_.getResourcesList.asScala.exists(_.getRole == role)) //only include agents with offers that include resources for this role
+      .map(o =>
+        o.getHostname -> AgentStats(
+          o.getResourcesList.asScala
+            .filter(r => r.getRole == role && r.getName == "mem")
+            .foldLeft(0.0)(_ + _.getScalar.getValue),
+          o.getResourcesList.asScala
+            .filter(r => r.getRole == role && r.getName == "cpus")
+            .foldLeft(0.0)(_ + _.getScalar.getValue),
+          Instant.now()))
+
+    log.debug(s"new agent offer stats: ${newOfferStats}")
+    agentOfferHistory = agentOfferHistory ++ newOfferStats
+    log.info(s"agent offer stats: ${agentOfferHistory}")
+
+    //prune stats that are > 3min old
+    agentOfferHistory = agentOfferHistory.filter(_._2.lastSeen.isAfter(Instant.now().minusSeconds(180)))
   }
 
   def pending() = tasks.collect { case (_, submitPending: SubmitPending) => submitPending.reqs }
