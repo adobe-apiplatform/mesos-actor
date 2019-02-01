@@ -36,14 +36,12 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
 
     var tasksInNeed: ListBuffer[TaskDef] = t.to[ListBuffer]
     var result = Map[OfferID, Seq[(TaskInfo, Seq[Int])]]()
-    var acceptedOfferAgent
-      : String = null //accepted offers must reside on single agent: https://github.com/apache/mesos/blob/master/src/master/validation.cpp#L1768
     val sortedOffers = o.toSeq.sortBy(
       _.getResourcesList.asScala
         .find(_.getName == "cpus")
         .map(_.getScalar.getValue))
 
-    sortedOffers.map(offer => {
+    sortedOffers.foreach(offer => {
       try {
         //for testing worst case scenario...
         if (!isValid(offer)) {
@@ -56,8 +54,7 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
           .iterator
         val hasSomePorts = portsItr.nonEmpty && portsItr.next().getRanges.getRangeList.size() > 0
 
-        val agentId = offer.getAgentId.getValue
-        if (hasSomePorts && (acceptedOfferAgent == null || acceptedOfferAgent == agentId)) {
+        if (hasSomePorts) {
           val scalarResources = offer.getResourcesList.asScala
             .filter(_.getRole == role) //ignore resources with other roles
             .filter(res => Seq("cpus", "mem", "ports").contains(res.getName))
@@ -108,7 +105,6 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
                 logger.info(
                   s"offer did not match resource requirements cpu:${taskCpus} (${remainingOfferCpus}), mem: ${taskMem}  (${remainingOfferMem}), ports: ${task.ports.size} (${hostPorts.size})")
               } else {
-                acceptedOfferAgent = agentId
 
                 //mark resources as used
                 remainingOfferCpus -= taskCpus
