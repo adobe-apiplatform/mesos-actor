@@ -93,9 +93,15 @@ class MesosClientTests
     MesosClient.agentOfferHistory.size shouldBe 3
     MesosClient.agentOfferHistory.keys shouldBe Set("192.168.99.100", "192.168.99.101", "192.168.99.102")
     MesosClient.agentOfferHistory.foreach(_ match {
-      case (_, AgentStats(mem, cpus, _)) =>
+      case (host, AgentStats(mem, cpus, ports, _)) =>
         mem shouldBe 2902.0
-        cpus shouldBe 0.9
+        if (host == "192.168.99.101") {
+          cpus shouldBe 1.0
+          ports shouldBe 202
+        } else {
+          cpus shouldBe 0.9
+          ports shouldBe 199
+        }
     })
 
     //wait for post accept

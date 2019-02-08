@@ -48,6 +48,11 @@ dependencies {
     compile "com.lightbend.akka:akka-stream-alpakka-simple-codecs_${scalaVersion}:0.9"
     //for JSON printing of protobuf
     compile "com.google.protobuf:protobuf-java-util:3.3.1"
+    //pureconfig for...config
+    compile("com.github.pureconfig:pureconfig_2.12:0.9.0") {
+        exclude group: "org.scala-lang", module: "scala-compiler"
+        exclude group: "org.scala-lang", module: "scala-reflect"
+    }
 
     testCompile 'org.scalatest:scalatest_2.12:3.0.1'
     testCompile "com.typesafe.akka:akka-testkit_${scalaVersion}:${akkaVersion}"

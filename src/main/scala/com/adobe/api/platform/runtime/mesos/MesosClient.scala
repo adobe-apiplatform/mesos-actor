@@ -37,11 +37,12 @@ import org.apache.mesos.v1.Protos.OfferID
 import org.apache.mesos.v1.Protos.TaskID
 import org.apache.mesos.v1.Protos.TaskInfo
 import org.apache.mesos.v1.Protos.TaskStatus
-import org.apache.mesos.v1.Protos.{TaskState => MesosTaskState}
 import org.apache.mesos.v1.Protos.TaskStatus.Reason
+import org.apache.mesos.v1.Protos.{TaskState => MesosTaskState}
 import org.apache.mesos.v1.scheduler.Protos.Call
 import org.apache.mesos.v1.scheduler.Protos.Call._
 import org.apache.mesos.v1.scheduler.Protos.Event
+import pureconfig._
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.concurrent.ExecutionContext
@@ -135,7 +136,8 @@ case class DeletePending(taskId: String, promise: Promise[Deleted]) extends Task
 case class Deleted(taskId: String, taskStatus: TaskStatus) extends TaskState
 case class Failed(taskId: String, agentId: String) extends TaskState
 
-case class AgentStats(mem: Double, cpu: Double, lastSeen: Instant)
+case class MesosActorConfig(agentStatsTTL: FiniteDuration)
+case class AgentStats(mem: Double, cpu: Double, ports: Int, lastSeen: Instant)
 
 //TODO: mesos authentication
 trait MesosClientActor extends Actor with ActorLogging with MesosClientConnection {
@@ -159,6 +161,8 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   val heartbeatMaxFailures: Int
   var heartbeatMonitor: Option[Cancellable] = None
   var heartbeatFailures: Int = 0
+
+  val config = loadConfigOrThrow[MesosActorConfig]("mesos-actor")
 
   if (autoSubscribe) {
     log.info(s"auto-subscribing ${self} to mesos master at ${master}")
@@ -393,7 +397,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     log.info(s"received ${event.getOffersList.size} offers: ${toCompactJsonString(event);}")
 
     //store a reference of last memory offer (total) from each agent
-    MesosClient.updateAgentStats(role, event)
+    MesosClient.updateAgentStats(config, role, event)
     log.info(s"agent offer stats: ${agentOfferHistory}")
 
     val matchedTasks = taskMatcher.matchTasksToOffers(role, pending, event.getOffersList.asScala.toList, taskBuilder)
@@ -692,22 +696,28 @@ object MesosClient {
               .setLaunch(Offer.Operation.Launch.newBuilder
                 .addAllTaskInfos(tasks))))
       .build
-  def updateAgentStats(role: String, offers: Event.Offers) = {
-    val newOfferStats = offers.getOffersList.asScala
-      .filter(_.getResourcesList.asScala.exists(_.getRole == role)) //only include agents with offers that include resources for this role
-      .map(o =>
-        o.getHostname -> AgentStats(
-          o.getResourcesList.asScala
-            .filter(r => r.getRole == role && r.getName == "mem")
-            .foldLeft(0.0)(_ + _.getScalar.getValue),
-          o.getResourcesList.asScala
-            .filter(r => r.getRole == role && r.getName == "cpus")
-            .foldLeft(0.0)(_ + _.getScalar.getValue),
+  def updateAgentStats(config: MesosActorConfig, role: String, offers: Event.Offers) = {
+    //create a map of hostname -> Map[Map[resourceType->resources]], which only includes
+    // - resources with this role
+    // - offers that include all 3 resource types
+    val agentResourceMap = offers.getOffersList.asScala
+      .map(o => o.getHostname -> o.getResourcesList.asScala.filter(_.getRole == role).groupBy(_.getName)) //map hostname to resource map including only resources allocated to this role
+      .filter(a => Set("cpus", "mem", "ports").subsetOf(a._2.keySet)) //remove hosts that do not have resources allocated for all of cpus+mem+ports
+      .toMap
+    //create AgentStats for each agent by summing all
+    val newOfferStats = agentResourceMap.mapValues(
+      v =>
+        AgentStats(
+          v("mem").map(_.getScalar.getValue).sum,
+          v("cpus").map(_.getScalar.getValue).sum,
+          v("ports").foldLeft(0)(_ + _.getRanges.getRangeList.asScala.foldLeft(0)((a, b) =>
+            a + b.getEnd.toInt - b.getBegin.toInt + 1)),
           Instant.now()))
-
+    //update agentOfferHistory (replace existing agents' data, add new agents' data)
     agentOfferHistory = agentOfferHistory ++ newOfferStats
 
-    //prune stats that are > 3min old
-    agentOfferHistory = agentOfferHistory.filter(_._2.lastSeen.isAfter(Instant.now().minusSeconds(180)))
+    //prune stats that are > TTL old (remove old/unseen agents' data)
+    agentOfferHistory =
+      agentOfferHistory.filter(_._2.lastSeen.isAfter(Instant.now().minusSeconds(config.agentStatsTTL.toSeconds)))
   }
 }
