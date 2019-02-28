@@ -14,6 +14,7 @@
 
 package com.adobe.api.platform.runtime.mesos.mesos
 
+import akka.actor.ActorRef
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.http.scaladsl.model.HttpResponse
@@ -21,9 +22,9 @@ import akka.http.scaladsl.model.StatusCodes
 import akka.pattern.ask
 import akka.testkit.ImplicitSender
 import akka.testkit.TestKit
+import akka.testkit.TestProbe
 import akka.util.Timeout
 import com.adobe.api.platform.runtime.mesos._
-import java.time.Instant
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.Protos.TaskID
@@ -36,10 +37,8 @@ import org.scalatest.FlatSpecLike
 import org.scalatest.Matchers
 import org.scalatest.concurrent.ScalaFutures
 import org.scalatest.junit.JUnitRunner
-import scala.concurrent.Await
 import scala.concurrent.Future
 import scala.concurrent.duration._
-import scala.util.Failure
 @RunWith(classOf[JUnitRunner])
 class MesosClientTests
     extends TestKit(ActorSystem("MySpec"))
@@ -60,7 +59,9 @@ class MesosClientTests
   behavior of "MesosClientActor actor"
 
   it should "launch submitted tasks to RUNNING (+ healthy) after offers are received" in {
-    val mesosClient = system.actorOf(Props(new TestMesosClientActor(id)))
+    val statsListener = TestProbe()
+    //val sub = system.actorOf(Props(new MesosClientSubscriber(statsListener.ref)))
+    val mesosClient = system.actorOf(Props(new TestMesosClientActor(id, Some(statsListener.ref))))
 
     //subscribe
     mesosClient ! Subscribe
@@ -90,17 +91,24 @@ class MesosClientTests
     expectMsg("ACCEPT_SENT")
 
     //verify agentOfferHistory
-    MesosClient.agentOfferHistory.size shouldBe 3
-    MesosClient.agentOfferHistory.keys shouldBe Set("192.168.99.100", "192.168.99.101", "192.168.99.102")
-    MesosClient.agentOfferHistory.foreach(_ match {
+    val stats = statsListener.expectMsgType[MesosAgentStats].stats
+
+    stats.size shouldBe 3
+    stats.keys shouldBe Set("192.168.99.100", "192.168.99.101", "192.168.99.102")
+    stats.foreach(_ match {
       case (host, AgentStats(mem, cpus, ports, _)) =>
-        mem shouldBe 2902.0
-        if (host == "192.168.99.101") {
+        if (host == "192.168.99.100") {
+          cpus shouldBe 0.9
+          ports shouldBe 199
+          mem shouldBe 2902.0
+        } else if (host == "192.168.99.101") {
           cpus shouldBe 1.0
           ports shouldBe 202
+          mem shouldBe 2902.0
         } else {
           cpus shouldBe 0.9
           ports shouldBe 199
+          mem shouldBe 2902.0
         }
     })
 
@@ -307,7 +315,9 @@ class MesosClientTests
       e shouldBe a[MesosException]
     }
   }
-  class TestMesosClientActor(override val id: () => String) extends MesosClientActor() with MesosClientConnection {
+  class TestMesosClientActor(override val id: () => String, override val listener: Option[ActorRef] = None)
+      extends MesosClientActor()
+      with MesosClientConnection {
 
     override val frameworkName: String = "testframework"
     override val master: String = "none"
