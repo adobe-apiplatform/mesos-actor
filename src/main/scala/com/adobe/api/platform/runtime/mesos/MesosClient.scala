@@ -33,6 +33,7 @@ import org.apache.mesos.v1.Protos.ExecutorID
 import org.apache.mesos.v1.Protos.FrameworkID
 import org.apache.mesos.v1.Protos.Offer
 import org.apache.mesos.v1.Protos.OfferID
+import org.apache.mesos.v1.Protos.Resource
 import org.apache.mesos.v1.Protos.TaskID
 import org.apache.mesos.v1.Protos.TaskInfo
 import org.apache.mesos.v1.Protos.TaskStatus
@@ -44,6 +45,7 @@ import org.apache.mesos.v1.scheduler.Protos.Event
 import pureconfig._
 import scala.collection.JavaConverters._
 import scala.collection.mutable
+import scala.collection.mutable.Buffer
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
@@ -136,7 +138,7 @@ case class Deleted(taskId: String, taskStatus: TaskStatus) extends TaskState
 case class Failed(taskId: String, agentId: String) extends TaskState
 
 case class MesosActorConfig(agentStatsTTL: FiniteDuration)
-case class AgentStats(mem: Double, cpu: Double, ports: Int, lastSeen: Instant)
+case class AgentStats(mem: Double, cpu: Double, ports: Int, lastSeen: Instant, expiration: Instant)
 
 case class MesosAgentStats(stats: Map[String, AgentStats])
 //TODO: mesos authentication
@@ -187,7 +189,15 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
 
       })
   }
+  case object PruneStats
 
+  val statsPruner =
+    actorSystem.scheduler.schedule(30.seconds, 10.seconds, context.actorOf(Props(new Actor {
+      override def receive: Receive = {
+        case PruneStats =>
+          context.parent ! PruneStats //client actor needs to handle PruneStats to avoid concurrent update to stats map
+      }
+    })), PruneStats)
   //cache the framework id, so that in case this actor restarts we can reconnect
   if (MesosClient.frameworkID.isEmpty) MesosClient.frameworkID = Some(FrameworkID.newBuilder().setValue(id()).build())
   private val frameworkID = MesosClient.frameworkID.get
@@ -259,7 +269,15 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     case event: Event.Offers     => handleOffers(event)
     case event: Event.Subscribed => handleSubscribed(event)
     case Heartbeat               => handleHeartbeat()
-
+    case PruneStats              =>
+      //prune stats that are > TTL old (remove old/unseen agents' data)
+      val toPrune = agentOfferHistory.filter(_._2.expiration.isBefore(Instant.now()))
+      if (toPrune.nonEmpty) {
+        agentOfferHistory = agentOfferHistory -- toPrune.keys
+        logger.info(s"pruned ${toPrune.size} expired agent stats")
+        //publish MesosAgentStats to subscribers
+        listener.foreach(_ ! MesosAgentStats(agentOfferHistory))
+      }
     case msg => log.warning(s"unknown msg: ${msg}")
   }
 
@@ -396,7 +414,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
 
   def handleOffers(event: Event.Offers) = {
 
-    log.info(s"received ${event.getOffersList.size} offers: ${toCompactJsonString(event);}")
+    log.debug(s"received ${event.getOffersList.size} offers: ${toCompactJsonString(event);}")
 
     val agentOfferMap = event.getOffersList.asScala
       .map(o => o.getHostname -> o.getResourcesList.asScala.filter(_.getRole == role).groupBy(_.getName)) //map hostname to resource map including only resources allocated to this role
@@ -404,12 +422,17 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       .toMap
     if (agentOfferMap.nonEmpty) {
       log.info(
-        s"received ${event.getOffersList.size} offers total and ${agentOfferMap.size} offers for role $role: ${agentOfferMap
-          .map(o => o._1 + ":" + o._2.get("mem").map(_.map(_.getScalar.getValue)))}")
-      agentOfferMap.foreach(o =>
-        log.info(s"usable offer ${o._1}: ${o._2.map(r => r._1 + ":" + r._2.map(toCompactJsonString))}"))
+        s"received ${event.getOffersList.size} offers total and ${agentOfferMap.size} usable offers for role $role")
+      agentOfferMap.foreach(
+        o =>
+          log.info(
+            s"usable offer ${o._1}: max mem:${o._2("mem").maxBy(_.getScalar.getValue).getScalar.getValue}  max cpus:${o
+              ._2("cpus")
+              .maxBy(_.getScalar.getValue)
+              .getScalar
+              .getValue} max ports:${MesosClient.countPorts(o._2("ports"))}"))
 
-      log.info(s"agent offer stats: ${agentOfferHistory}")
+      log.debug(s"agent offer stats: {}", agentOfferHistory)
 
       val matchedTasks = taskMatcher.matchTasksToOffers(role, pending, event.getOffersList.asScala.toList, taskBuilder)
 
@@ -472,12 +495,9 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       }
 
       //store a reference of last memory offer (total) from each agent
-      val newOfferStats = MesosClient.getOfferStats(role, event)
+      val newOfferStats = MesosClient.getOfferStats(config, role, event)
       //update agentOfferHistory (replace existing agents' data, add new agents' data)
       agentOfferHistory = agentOfferHistory ++ newOfferStats
-      //prune stats that are > TTL old (remove old/unseen agents' data)
-      agentOfferHistory =
-        agentOfferHistory.filter(_._2.lastSeen.isAfter(Instant.now().minusSeconds(config.agentStatsTTL.toSeconds)))
       //publish MesosAgentStats to subscribers
       listener.foreach(_ ! MesosAgentStats(agentOfferHistory))
     } else {
@@ -718,7 +738,7 @@ object MesosClient {
               .setLaunch(Offer.Operation.Launch.newBuilder
                 .addAllTaskInfos(tasks))))
       .build
-  def getOfferStats(role: String, offers: Event.Offers) = {
+  def getOfferStats(config: MesosActorConfig, role: String, offers: Event.Offers) = {
     //create a map of offer -> Map[Map[resourceType->resources]], which only includes
     // - resources with this role
     // - offers that include all 3 resource types
@@ -727,14 +747,22 @@ object MesosClient {
       .filter(a => Set("cpus", "mem", "ports").subsetOf(a._2.keySet)) //remove hosts that do not have resources allocated for all of cpus+mem+ports
       .toMap
 
+    //calculate expiration
+    val lastSeen = Instant.now()
+    val expiration = lastSeen.plusSeconds(config.agentStatsTTL.toSeconds)
     //ports cannot be mapped to sum, need to calculate the size of ranges
     agentOfferMap.mapValues { resources =>
       AgentStats(
         resources("mem").map(_.getScalar.getValue).sum,
         resources("cpus").map(_.getScalar.getValue).sum,
-        resources("ports").foldLeft(0)(_ + _.getRanges.getRangeList.asScala.foldLeft(0)((a, b) =>
-          a + b.getEnd.toInt - b.getBegin.toInt + 1)),
-        Instant.now())
+        countPorts(resources("ports")),
+        lastSeen,
+        expiration)
     }
+  }
+
+  protected[mesos] def countPorts(portsResources: Buffer[Resource]): Int = {
+    portsResources.foldLeft(0)(
+      _ + _.getRanges.getRangeList.asScala.foldLeft(0)((a, b) => a + b.getEnd.toInt - b.getBegin.toInt + 1))
   }
 }

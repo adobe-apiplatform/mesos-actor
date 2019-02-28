@@ -96,7 +96,7 @@ class MesosClientTests
     stats.size shouldBe 3
     stats.keys shouldBe Set("192.168.99.100", "192.168.99.101", "192.168.99.102")
     stats.foreach(_ match {
-      case (host, AgentStats(mem, cpus, ports, _)) =>
+      case (host, AgentStats(mem, cpus, ports, _, _)) =>
         if (host == "192.168.99.100") {
           cpus shouldBe 0.9
           ports shouldBe 199
