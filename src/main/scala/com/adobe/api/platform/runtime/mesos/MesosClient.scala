@@ -137,7 +137,7 @@ case class DeletePending(taskId: String, promise: Promise[Deleted]) extends Task
 case class Deleted(taskId: String, taskStatus: TaskStatus) extends TaskState
 case class Failed(taskId: String, agentId: String) extends TaskState
 
-case class MesosActorConfig(agentStatsTTL: FiniteDuration)
+case class MesosActorConfig(agentStatsTTL: FiniteDuration, agentStatsPruningPeriod: FiniteDuration)
 case class AgentStats(mem: Double, cpu: Double, ports: Int, lastSeen: Instant, expiration: Instant)
 
 case class MesosAgentStats(stats: Map[String, AgentStats])
@@ -164,7 +164,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   var heartbeatMonitor: Option[Cancellable] = None
   var heartbeatFailures: Int = 0
 
-  var agentOfferHistory = Map.empty[String, AgentStats] //track the most recent offer stats per agent
+  var agentOfferHistory = Map.empty[String, AgentStats] // Map[<agent hostname> -> <stats>] track the most recent offer stats per agent hostname
   val listener: Option[ActorRef]
 
   val config = loadConfigOrThrow[MesosActorConfig]("mesos-actor")
@@ -192,7 +192,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   case object PruneStats
 
   val statsPruner =
-    actorSystem.scheduler.schedule(30.seconds, 10.seconds, context.actorOf(Props(new Actor {
+    actorSystem.scheduler.schedule(30.seconds, config.agentStatsPruningPeriod, context.actorOf(Props(new Actor {
       override def receive: Receive = {
         case PruneStats =>
           context.parent ! PruneStats //client actor needs to handle PruneStats to avoid concurrent update to stats map
