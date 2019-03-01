@@ -495,7 +495,12 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       }
 
       //store a reference of last memory offer (total) from each agent
-      val newOfferStats = MesosClient.getOfferStats(config, role, event)
+      val newOfferStats = MesosClient.getOfferStats(config, role, agentOfferMap)
+      //log the agents that previously had offers, but no longer have offers, and are not yet pruned
+      val diff = newOfferStats.keySet.diff(agentOfferMap.keySet)
+      if (diff.nonEmpty) {
+        log.info(s"some agents not included in offer cycle: ${diff} ")
+      }
       //update agentOfferHistory (replace existing agents' data, add new agents' data)
       agentOfferHistory = agentOfferHistory ++ newOfferStats
       //publish MesosAgentStats to subscribers
@@ -738,15 +743,9 @@ object MesosClient {
               .setLaunch(Offer.Operation.Launch.newBuilder
                 .addAllTaskInfos(tasks))))
       .build
-  def getOfferStats(config: MesosActorConfig, role: String, offers: Event.Offers) = {
-    //create a map of offer -> Map[Map[resourceType->resources]], which only includes
-    // - resources with this role
-    // - offers that include all 3 resource types
-    val agentOfferMap = offers.getOffersList.asScala
-      .map(o => o.getHostname -> o.getResourcesList.asScala.filter(_.getRole == role).groupBy(_.getName)) //map hostname to resource map including only resources allocated to this role
-      .filter(a => Set("cpus", "mem", "ports").subsetOf(a._2.keySet)) //remove hosts that do not have resources allocated for all of cpus+mem+ports
-      .toMap
-
+  def getOfferStats(config: MesosActorConfig,
+                    role: String,
+                    agentOfferMap: Map[String, Map[String, Buffer[Resource]]]) = {
     //calculate expiration
     val lastSeen = Instant.now()
     val expiration = lastSeen.plusSeconds(config.agentStatsTTL.toSeconds)
