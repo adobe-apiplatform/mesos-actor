@@ -138,7 +138,7 @@ case class Deleted(taskId: String, taskStatus: TaskStatus) extends TaskState
 case class Failed(taskId: String, agentId: String) extends TaskState
 
 case class MesosActorConfig(agentStatsTTL: FiniteDuration, agentStatsPruningPeriod: FiniteDuration)
-case class AgentStats(mem: Double, cpu: Double, ports: Int, lastSeen: Instant, expiration: Instant)
+case class AgentStats(mem: Double, cpu: Double, ports: Int, expiration: Instant)
 
 case class MesosAgentStats(stats: Map[String, AgentStats])
 //TODO: mesos authentication
@@ -501,7 +501,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       if (diff.nonEmpty) {
         log.info(s"some agents not included in offer cycle: ${diff} ")
       }
-      //update agentOfferHistory (replace existing agents' data, add new agents' data)
+      //update agentOfferHistory (replace existing agents' data, add new agents' data); not all agents may be included in every offer cycle
       agentOfferHistory = agentOfferHistory ++ newOfferStats
       //publish MesosAgentStats to subscribers
       listener.foreach(_ ! MesosAgentStats(agentOfferHistory))
@@ -747,15 +747,13 @@ object MesosClient {
                     role: String,
                     agentOfferMap: Map[String, Map[String, Buffer[Resource]]]) = {
     //calculate expiration
-    val lastSeen = Instant.now()
-    val expiration = lastSeen.plusSeconds(config.agentStatsTTL.toSeconds)
+    val expiration = Instant.now().plusSeconds(config.agentStatsTTL.toSeconds)
     //ports cannot be mapped to sum, need to calculate the size of ranges
     agentOfferMap.mapValues { resources =>
       AgentStats(
         resources("mem").map(_.getScalar.getValue).sum,
         resources("cpus").map(_.getScalar.getValue).sum,
         countPorts(resources("ports")),
-        lastSeen,
         expiration)
     }
   }
