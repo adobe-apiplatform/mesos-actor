@@ -8,7 +8,7 @@ services:
       ZOO_PORT: 2188
 
   master:
-    image: mesosphere/mesos-master:${MESOS_VERSION-1.2.1}
+    image: mesosphere/mesos-master:${MESOS_VERSION-1.2.3}
     entrypoint:
       - sh
       - -c
@@ -21,7 +21,7 @@ services:
       - zk
 
   slave:
-    image: mesosphere/mesos-slave:${MESOS_VERSION-1.2.1}
+    image: mesosphere/mesos-slave:${MESOS_VERSION-1.2.3}
     privileged: true
 # See:  https://issues.apache.org/jira/browse/MESOS-3793
     # entrypoint:
