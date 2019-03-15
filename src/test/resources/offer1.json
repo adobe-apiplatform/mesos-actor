@@ -97,6 +97,9 @@
         "range": [{
           "begin": "11001",
           "end": "11199"
+        },{
+          "begin": "11200",
+          "end": "11202"
         }]
       },
       "role": "*",
@@ -114,6 +117,26 @@
         "role": "*"
       }
     }, {
+      "name": "cpus",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 0.1
+      },
+      "role": "other",
+      "allocationInfo": {
+        "role": "*"
+      }
+    }, {
+      "name": "cpus",
+      "type": "SCALAR",
+      "scalar": {
+        "value": 0.1
+      },
+      "role": "*",
+      "allocationInfo": {
+        "role": "*"
+      }
+    },{
       "name": "mem",
       "type": "SCALAR",
       "scalar": {
