@@ -23,15 +23,16 @@ import org.apache.mesos.v1.Protos.TaskInfo
 import org.apache.mesos.v1.Protos.Value
 import org.apache.mesos.v1.Protos.Value.Ranges
 import scala.collection.JavaConverters._
+import scala.collection.mutable.Buffer
 import scala.collection.mutable.ListBuffer
 
 trait TaskMatcher {
   def matchTasksToOffers(role: String, t: Iterable[TaskDef], o: Iterable[Offer], builder: TaskBuilder)(
-    implicit logger: LoggingAdapter): Map[OfferID, Seq[(TaskInfo, Seq[Int])]]
+    implicit logger: LoggingAdapter): (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)])
 }
 class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatcher {
   override def matchTasksToOffers(role: String, t: Iterable[TaskDef], o: Iterable[Offer], builder: TaskBuilder)(
-    implicit logger: LoggingAdapter): Map[OfferID, Seq[(TaskInfo, Seq[Int])]] = {
+    implicit logger: LoggingAdapter): (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)]) = {
     //we can launch many tasks on a single offer
 
     var tasksInNeed: ListBuffer[TaskDef] = t.to[ListBuffer]
@@ -40,7 +41,7 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
       _.getResourcesList.asScala
         .find(_.getName == "cpus")
         .map(_.getScalar.getValue))
-
+    var remaining: Map[OfferID, (Float, Float, Int)] = Map.empty
     sortedOffers.foreach(offer => {
       try {
         //for testing worst case scenario...
@@ -68,6 +69,17 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
             var remainingOfferMem = scalarResources("mem")
             var usedPorts = ListBuffer[Int]()
             var acceptedTasks = ListBuffer[(TaskInfo, Seq[Int])]()
+            //check for a good fit
+            //collect ranges from ports resources
+            val offerPortsRanges = offer.getResourcesList.asScala
+              .filter(res => res.getName == "ports")
+              .filter(_.getRole == role) //ignore resources with other roles
+              .map(res => res.getRanges)
+
+            //before matching, consider all resources remaining
+            remaining = remaining + (offer.getId -> (remainingOfferMem.toFloat, remainingOfferCpus.toFloat, countPorts(
+              offerPortsRanges) - usedPorts.size))
+
             tasksInNeed.map(task => {
 
               val taskCpus = task.cpus
@@ -86,12 +98,6 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
                 }
               })
               logger.debug(s"constraintChecks ${constraintChecks}")
-              //check for a good fit
-              //collect ranges from ports resources
-              val offerPortsRanges = offer.getResourcesList.asScala
-                .filter(res => res.getName == "ports")
-                .filter(_.getRole == role) //ignore resources with other roles
-                .map(res => res.getRanges)
               //pluck the number of ports needed for this task
               val hostPorts = pluckPorts(offerPortsRanges, task.ports.size, usedPorts)
               val matchedResources = remainingOfferCpus > taskCpus &&
@@ -105,12 +111,13 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
                 logger.info(
                   s"offer did not match resource requirements cpu:${taskCpus} (${remainingOfferCpus}), mem: ${taskMem}  (${remainingOfferMem}), ports: ${task.ports.size} (${hostPorts.size})")
               } else {
-
                 //mark resources as used
                 remainingOfferCpus -= taskCpus
                 remainingOfferMem -= taskMem
                 usedPorts ++= hostPorts
-
+                //update remaining for all resource usage
+                remaining = remaining + (offer.getId -> (remainingOfferMem.toFloat, remainingOfferCpus.toFloat, countPorts(
+                  offerPortsRanges) - usedPorts.size))
                 //build port mappings
                 val portMappings =
                   if (task.ports.isEmpty) List()
@@ -180,7 +187,7 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
         case t: Exception => logger.error(s"task matching failed, ignoring offer ${offer.getId} ${t}")
       }
     })
-    result
+    (result, remaining)
   }
 
   def pluckPorts(rangesList: Iterable[org.apache.mesos.v1.Protos.Value.Ranges],
@@ -200,5 +207,8 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
       })
     })
     ports.toList
+  }
+  def countPorts(portRanges: Buffer[Ranges]) = {
+    portRanges.foldLeft(0)(_ + _.getRangeList.asScala.foldLeft(0)((a, b) => a + b.getEnd.toInt - b.getBegin.toInt + 1))
   }
 }

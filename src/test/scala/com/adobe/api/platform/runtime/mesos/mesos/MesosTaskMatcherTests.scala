@@ -36,7 +36,7 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
     val offers = ProtobufUtil.getOffers("/offer1.json")
 
     val tasks = List[TaskDef](TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(8080)))
-    val taskMap =
+    val (taskMap, _) =
       new DefaultTaskMatcher().matchTasksToOffers("*", tasks, offers.getOffersList.asScala, new DefaultTaskBuilder())
 
     taskMap.size shouldBe 1
@@ -46,7 +46,7 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
     val offers = ProtobufUtil.getOffers("/partialoffer.json")
 
     val tasks = List[TaskDef](TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(8080)))
-    val taskMap =
+    val (taskMap, _) =
       new DefaultTaskMatcher()
         .matchTasksToOffers("whisk", tasks, offers.getOffersList.asScala, new DefaultTaskBuilder())
 
@@ -57,7 +57,7 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
     val offers = ProtobufUtil.getOffers("/badoffer.json")
 
     val tasks = List[TaskDef](TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(8080)))
-    val taskMap =
+    val (taskMap, _) =
       new DefaultTaskMatcher(badOffer)
         .matchTasksToOffers("*", tasks, offers.getOffersList.asScala, new DefaultTaskBuilder())
 
@@ -70,7 +70,7 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
     val offers = ProtobufUtil.getOffers("/offer-noports.json")
 
     val tasks = List[TaskDef](TaskDef("taskId", "taskName", "dockerImage:someTag", 0.1, 256, List(8080)))
-    val taskMap =
+    val (taskMap, _) =
       new DefaultTaskMatcher().matchTasksToOffers("*", tasks, offers.getOffersList.asScala, new DefaultTaskBuilder())
 
     taskMap.size shouldBe 0
@@ -119,7 +119,7 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
         256,
         List(8080),
         constraints = Set(Constraint("att2", LIKE, "(?!att1value).*")))) //test negative lookahead to match same as UNLIKE
-    val taskMap =
+    val (taskMap, _) =
       new DefaultTaskMatcher().matchTasksToOffers("*", tasks, offers.getOffersList.asScala, new DefaultTaskBuilder())
     taskMap.values.flatten.map(_._1.getTaskId.getValue) shouldBe List("taskId2", "taskId3", "taskId4", "taskId5")
 
@@ -130,12 +130,18 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
     val tasks = List[TaskDef](
       TaskDef("taskId", "taskName", "dockerImage:someTag", 0.5, 256, List(8080)),
       TaskDef("taskId2", "taskName2", "dockerImage:someTag2", 0.5, 256, List(8080)))
-    val taskMap =
+    val (taskMap, remaining) =
       new DefaultTaskMatcher().matchTasksToOffers("*", tasks, offers.getOffersList.asScala, new DefaultTaskBuilder())
 
     taskMap.size shouldBe 2
     taskMap.keys.map(_.getValue) shouldBe Set(
       "7168e411-c3e4-4e29-b292-9b12eda4aaca-O58",
       "7168e411-c3e4-4e29-b292-9b12eda4aaca-O60")
+
+    remaining.map(r => r._1.getValue -> r._2) shouldBe Map(
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O58" -> (2656.0.toFloat, 0.3.toFloat, 198),
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O60" -> (2646.0.toFloat, 0.4.toFloat, 198),
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O59" -> (2902.0.toFloat, 1.0.toFloat, 199))
+
   }
 }
