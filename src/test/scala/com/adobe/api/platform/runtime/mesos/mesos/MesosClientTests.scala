@@ -363,7 +363,7 @@ class MesosClientTests
     override val tasks: TaskStore = new LocalTaskStore
     override val refuseSeconds: Double = 1.0
     override val heartbeatMaxFailures: Int = 2
-    override val config = MesosActorConfig(5.seconds, 30.seconds, Some(2))
+    override val config = MesosActorConfig(5.seconds, 30.seconds, Some(2), false)
 
     override def exec(call: Call): Future[HttpResponse] = {
       log.info(s"sending ${call.getType}")
