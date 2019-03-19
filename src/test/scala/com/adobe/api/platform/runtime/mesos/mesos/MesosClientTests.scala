@@ -16,11 +16,12 @@ package com.adobe.api.platform.runtime.mesos.mesos
 
 import akka.actor.ActorRef
 import akka.actor.ActorSystem
-import akka.actor.Props
+import akka.actor.Status.Failure
 import akka.http.scaladsl.model.HttpResponse
 import akka.http.scaladsl.model.StatusCodes
 import akka.pattern.ask
 import akka.testkit.ImplicitSender
+import akka.testkit.TestActorRef
 import akka.testkit.TestKit
 import akka.testkit.TestProbe
 import akka.util.Timeout
@@ -60,8 +61,7 @@ class MesosClientTests
 
   it should "launch submitted tasks to RUNNING (+ healthy) after offers are received" in {
     val statsListener = TestProbe()
-    //val sub = system.actorOf(Props(new MesosClientSubscriber(statsListener.ref)))
-    val mesosClient = system.actorOf(Props(new TestMesosClientActor(id, Some(statsListener.ref))))
+    val mesosClient = TestActorRef(new TestMesosClientActor(id, Some(statsListener.ref)))
 
     //subscribe
     mesosClient ! Subscribe
@@ -203,10 +203,44 @@ class MesosClientTests
           .build())
       .build()
   }
+  it should "reject submitted tasks to after max offer cycles" in {
 
+    val statsListener = TestProbe()
+    val mesosClient = TestActorRef(new TestMesosClientActor(id, Some(statsListener.ref)))
+
+    //subscribe
+    mesosClient ! Subscribe
+    mesosClient
+      .ask(Subscribe)(Timeout(1.second))
+      .mapTo[SubscribeComplete]
+      .onComplete(complete => {
+        system.log.info("subscribe completed successfully...")
+      })
+    expectMsg(subscribeCompleteMsg)
+
+    //submit the task
+    mesosClient ! SubmitTask(
+      TaskDef(
+        "taskId1",
+        "taskId1",
+        "fake-docker-image",
+        0.1,
+        256,
+        List(8080),
+        healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
+        commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
+    //receive 3 empty offers (default max offers is 2, then capacity failure)
+    mesosClient ! ProtobufUtil.getOffers("/emptyoffer.json")
+    mesosClient ! ProtobufUtil.getOffers("/emptyoffer.json")
+    mesosClient ! ProtobufUtil.getOffers("/emptyoffer.json")
+
+    //expect this CapacityFailure
+    val failure = expectMsgType[Failure]
+    failure.cause shouldBe a[CapacityFailure]
+  }
   it should "tolerate TASK_FAILED after receiving DeleteTask" in {
 
-    val mesosClient = system.actorOf(Props(new TestMesosClientActor(id)))
+    val mesosClient = TestActorRef(new TestMesosClientActor(id))
 
     //subscribe
     mesosClient ! Subscribe
@@ -329,6 +363,7 @@ class MesosClientTests
     override val tasks: TaskStore = new LocalTaskStore
     override val refuseSeconds: Double = 1.0
     override val heartbeatMaxFailures: Int = 2
+    override val config = MesosActorConfig(5.seconds, 30.seconds, Some(2))
 
     override def exec(call: Call): Future[HttpResponse] = {
       log.info(s"sending ${call.getType}")
