@@ -493,27 +493,23 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         val acceptCall = MesosClient.accept(frameworkID, Seq(offerTasks._1).asJava, taskInfos)
         execInternal(acceptCall).onComplete {
           case Success(r) =>
-            matchedTasks.foreach(entry => {
-              entry._2.foreach(task => {
-                tasks(task._1.getTaskId.getValue) match {
-                  case s @ SubmitPending(reqs, promise, _) =>
-                    //dig the hostname out of the offer whose agent id matches the agent id in the task info
-                    val hostname =
-                      event.getOffersList.asScala.find(p => p.getAgentId == task._1.getAgentId).get.getHostname
-                    tasks.update(reqs.taskId, Submitted(s, task._1, entry._1, hostname, task._2, promise))
-                  case previousState =>
-                    log.warning(s"submitted a task that was not in SubmitPending? ${previousState}")
-                }
-              })
-
+            offerTasks._2.foreach(task => {
+              tasks(task._1.getTaskId.getValue) match {
+                case s @ SubmitPending(reqs, promise, _) =>
+                  //dig the hostname out of the offer whose agent id matches the agent id in the task info
+                  val hostname =
+                    event.getOffersList.asScala.find(p => p.getAgentId == task._1.getAgentId).get.getHostname
+                  tasks.update(reqs.taskId, Submitted(s, task._1, offerTasks._1, hostname, task._2, promise))
+                case previousState =>
+                  log.warning(s"submitted a task that was not in SubmitPending? ${previousState}")
+              }
             })
-            if (!pending.isEmpty) {
-              log.warning("still have pending tasks after OFFER + ACCEPT: ")
-              pending.foreach(t => log.info(s"pending taskid ${t.taskId}"))
-            }
           case Failure(t) => log.error(s"failure ${t}")
         }
-
+      }
+      if (pending.nonEmpty) {
+        log.warning("still have pending tasks after OFFER + ACCEPT: ")
+        pending.foreach(t => log.info(s"pending taskid ${t.taskId} ${t.mem}MB ${t.cpus}CPUS"))
       }
       //generate failures for pending tasks that did not fit any offers
       config.failPendingOfferCycles.foreach { maxOfferCycles =>

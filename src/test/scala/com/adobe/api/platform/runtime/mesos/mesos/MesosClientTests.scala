@@ -349,6 +349,144 @@ class MesosClientTests
       e shouldBe a[MesosException]
     }
   }
+  it should "match multiple offers at once" in {
+    val statsListener = TestProbe()
+    val mesosClient = TestActorRef(new TestMesosClientActor(id, Some(statsListener.ref)))
+
+    //subscribe
+    mesosClient ! Subscribe
+    mesosClient
+      .ask(Subscribe)(Timeout(1.second))
+      .mapTo[SubscribeComplete]
+      .onComplete(complete => {
+        system.log.info("subscribe completed successfully...")
+      })
+    expectMsg(subscribeCompleteMsg)
+
+    //submit the task
+    mesosClient ! SubmitTask(
+      TaskDef(
+        "taskId1",
+        "taskId1",
+        "fake-docker-image",
+        0.1,
+        2500,
+        List(8080),
+        healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
+        commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
+    mesosClient ! SubmitTask(
+      TaskDef(
+        "taskId2",
+        "taskId2",
+        "fake-docker-image",
+        0.1,
+        2500,
+        List(8080),
+        healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
+        commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
+    mesosClient ! SubmitTask(
+      TaskDef(
+        "taskId3",
+        "taskId3",
+        "fake-docker-image",
+        0.1,
+        256,
+        List(8080),
+        healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
+        commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
+    //receive offers
+    mesosClient ! ProtobufUtil.getOffers("/offer-multiple.json")
+
+    //verify that ACCEPT was sent twice
+    expectMsg("ACCEPT_SENT")
+    expectMsg("ACCEPT_SENT")
+
+    //verify agentOfferHistory
+    val stats = statsListener.expectMsgType[MesosAgentStats].stats
+
+    stats.size shouldBe 3
+    stats.keys shouldBe Set("192.168.99.100", "192.168.99.101", "192.168.99.102")
+    stats.foreach(_ match {
+      case ("192.168.99.100", AgentStats(mem, cpus, ports, _)) =>
+        cpus shouldBe 0.8
+        ports shouldBe 199
+        mem shouldBe 2912.0
+      case ("192.168.99.101", AgentStats(mem, cpus, ports, _)) =>
+        cpus shouldBe 1.0
+        ports shouldBe 199
+        mem shouldBe 2902.0
+
+      case ("192.168.99.102", AgentStats(mem, cpus, ports, _)) =>
+        cpus shouldBe 0.9
+        ports shouldBe 199
+        mem shouldBe 2902.0
+      case _ => fail("unexpected offer host!")
+    })
+
+    //wait for post accept
+
+    val agentId = AgentID
+      .newBuilder()
+      .setValue("db6b062d-84e3-4a2e-a8c5-98ffa944a304-S1")
+      .build()
+    //receive the task details after successful launch
+    system.log.info("sending UPDATE")
+
+    mesosClient ! org.apache.mesos.v1.scheduler.Protos.Event.Update
+      .newBuilder()
+      .setStatus(
+        TaskStatus
+          .newBuilder()
+          .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+          .setState(TaskState.TASK_STAGING)
+          .setAgentId(agentId)
+          .build())
+      .build()
+    //verify that UPDATE was received
+
+    mesosClient ! org.apache.mesos.v1.scheduler.Protos.Event.Update
+      .newBuilder()
+      .setStatus(
+        TaskStatus
+          .newBuilder()
+          .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+          .setState(TaskState.TASK_RUNNING)
+          .setAgentId(agentId)
+          .setHealthy(false)
+          .build())
+      .build()
+
+    //verify that UPDATE was received
+    //verify that task is in RUNNING (but NOT healthy) state
+
+    //verify that UPDATE was received
+    //verify that task is in RUNNING (AND healthy) state
+
+    mesosClient ! org.apache.mesos.v1.scheduler.Protos.Event.Update
+      .newBuilder()
+      .setStatus(
+        TaskStatus
+          .newBuilder()
+          .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+          .setState(TaskState.TASK_RUNNING)
+          .setAgentId(agentId)
+          .setHealthy(true)
+          .build())
+      .build()
+    val runningTaskStatus = TaskStatus
+      .newBuilder()
+      .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+      .setState(TaskState.TASK_RUNNING)
+      .setAgentId(agentId)
+      .setHealthy(true)
+      .build()
+    //      val runningTaskInfo = ProtobufUtil.getTaskInfo("/taskdetails.json")
+    val expectedTaskDetails = Running("taskId1", agentId.getValue, runningTaskStatus, "192.168.99.101", List(11001))
+
+    expectMsg(expectedTaskDetails)
+
+  }
+
   class TestMesosClientActor(override val id: () => String, override val listener: Option[ActorRef] = None)
       extends MesosClientActor()
       with MesosClientConnection {
