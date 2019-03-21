@@ -61,7 +61,7 @@ class MesosClientTests
 
   it should "launch submitted tasks to RUNNING (+ healthy) after offers are received" in {
     val statsListener = TestProbe()
-    val mesosClient = TestActorRef(new TestMesosClientActor(id, Some(statsListener.ref)))
+    val mesosClient = TestActorRef(new TestMesosClientActor(id, Some(statsListener.ref), this.testActor))
 
     //subscribe
     mesosClient ! Subscribe
@@ -206,7 +206,7 @@ class MesosClientTests
   it should "reject submitted tasks to after max offer cycles" in {
 
     val statsListener = TestProbe()
-    val mesosClient = TestActorRef(new TestMesosClientActor(id, Some(statsListener.ref)))
+    val mesosClient = TestActorRef(new TestMesosClientActor(id, Some(statsListener.ref), this.testActor))
 
     //subscribe
     mesosClient ! Subscribe
@@ -240,7 +240,7 @@ class MesosClientTests
   }
   it should "tolerate TASK_FAILED after receiving DeleteTask" in {
 
-    val mesosClient = TestActorRef(new TestMesosClientActor(id))
+    val mesosClient = TestActorRef(new TestMesosClientActor(id, probe = this.testActor))
 
     //subscribe
     mesosClient ! Subscribe
@@ -351,7 +351,7 @@ class MesosClientTests
   }
   it should "match multiple offers at once" in {
     val statsListener = TestProbe()
-    val mesosClient = TestActorRef(new TestMesosClientActor(id, Some(statsListener.ref)))
+    val mesosClient = TestActorRef(new TestMesosClientActor(id, Some(statsListener.ref), this.testActor))
 
     //subscribe
     mesosClient ! Subscribe
@@ -486,8 +486,148 @@ class MesosClientTests
     expectMsg(expectedTaskDetails)
 
   }
+  it should "hold offers and match them immediately on task submission" in {
+    val statsListener = TestProbe()
+    val mesosClient = TestActorRef(new TestMesosClientActor(id, Some(statsListener.ref), this.testActor))
 
-  class TestMesosClientActor(override val id: () => String, override val listener: Option[ActorRef] = None)
+    //subscribe
+    mesosClient ! Subscribe
+    mesosClient
+      .ask(Subscribe)(Timeout(1.second))
+      .mapTo[SubscribeComplete]
+      .onComplete(complete => {
+        system.log.info("subscribe completed successfully...")
+      })
+    expectMsg(subscribeCompleteMsg)
+
+    //submit the task
+    mesosClient ! SubmitTask(
+      TaskDef(
+        "taskId1",
+        "taskId1",
+        "fake-docker-image",
+        0.1,
+        2500,
+        List(8080),
+        healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
+        commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
+    //receive offers
+    mesosClient ! ProtobufUtil.getOffers("/offer-multiple.json")
+
+    //verify that ACCEPT was sent
+    expectMsg("ACCEPT_SENT")
+
+    //verify agentOfferHistory
+    val stats = statsListener.expectMsgType[MesosAgentStats].stats
+
+    stats.size shouldBe 3
+    stats.keys shouldBe Set("192.168.99.100", "192.168.99.101", "192.168.99.102")
+    stats.foreach(_ match {
+      case ("192.168.99.100", AgentStats(mem, cpus, ports, _)) =>
+        cpus shouldBe 0.8
+        ports shouldBe 199
+        mem shouldBe 2912.0
+      case ("192.168.99.101", AgentStats(mem, cpus, ports, _)) =>
+        cpus shouldBe 1.0
+        ports shouldBe 199
+        mem shouldBe 2902.0
+
+      case ("192.168.99.102", AgentStats(mem, cpus, ports, _)) =>
+        cpus shouldBe 0.9
+        ports shouldBe 199
+        mem shouldBe 2902.0
+      case _ => fail("unexpected offer host!")
+    })
+
+    //wait for post accept
+
+    val agentId = AgentID
+      .newBuilder()
+      .setValue("db6b062d-84e3-4a2e-a8c5-98ffa944a304-S1")
+      .build()
+    //receive the task details after successful launch
+    system.log.info("sending UPDATE")
+
+    mesosClient ! org.apache.mesos.v1.scheduler.Protos.Event.Update
+      .newBuilder()
+      .setStatus(
+        TaskStatus
+          .newBuilder()
+          .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+          .setState(TaskState.TASK_STAGING)
+          .setAgentId(agentId)
+          .build())
+      .build()
+    //verify that UPDATE was received
+
+    mesosClient ! org.apache.mesos.v1.scheduler.Protos.Event.Update
+      .newBuilder()
+      .setStatus(
+        TaskStatus
+          .newBuilder()
+          .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+          .setState(TaskState.TASK_RUNNING)
+          .setAgentId(agentId)
+          .setHealthy(false)
+          .build())
+      .build()
+
+    //verify that UPDATE was received
+    //verify that task is in RUNNING (but NOT healthy) state
+
+    //verify that UPDATE was received
+    //verify that task is in RUNNING (AND healthy) state
+
+    mesosClient ! org.apache.mesos.v1.scheduler.Protos.Event.Update
+      .newBuilder()
+      .setStatus(
+        TaskStatus
+          .newBuilder()
+          .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+          .setState(TaskState.TASK_RUNNING)
+          .setAgentId(agentId)
+          .setHealthy(true)
+          .build())
+      .build()
+    val runningTaskStatus = TaskStatus
+      .newBuilder()
+      .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+      .setState(TaskState.TASK_RUNNING)
+      .setAgentId(agentId)
+      .setHealthy(true)
+      .build()
+    val expectedTaskDetails = Running("taskId1", agentId.getValue, runningTaskStatus, "192.168.99.101", List(11001))
+
+    expectMsg(expectedTaskDetails)
+
+    //submit additional tasks that should match the held offers
+    mesosClient ! SubmitTask(
+      TaskDef(
+        "taskId2",
+        "taskId2",
+        "fake-docker-image",
+        0.1,
+        2500,
+        List(8080),
+        healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
+        commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
+    mesosClient ! SubmitTask(
+      TaskDef(
+        "taskId3",
+        "taskId3",
+        "fake-docker-image",
+        0.1,
+        256,
+        List(8080),
+        healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
+        commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
+
+    expectMsg("ACCEPT_SENT")
+    expectMsg("ACCEPT_SENT")
+  }
+  class TestMesosClientActor(override val id: () => String,
+                             override val listener: Option[ActorRef] = None,
+                             probe: ActorRef)
       extends MesosClientActor()
       with MesosClientConnection {
 
@@ -501,15 +641,15 @@ class MesosClientTests
     override val tasks: TaskStore = new LocalTaskStore
     override val refuseSeconds: Double = 1.0
     override val heartbeatMaxFailures: Int = 2
-    override val config = MesosActorConfig(5.seconds, 30.seconds, Some(2), false)
+    override val config = MesosActorConfig(5.seconds, 30.seconds, Some(2), true, 5.seconds, 30.seconds)
 
     override def exec(call: Call): Future[HttpResponse] = {
       log.info(s"sending ${call.getType}")
       call.getType match {
         case Call.Type.ACCEPT =>
           logger.info("got ACCEPT; sending ACCEPT_SENT")
-          sender() ! "ACCEPT_SENT"
-
+          //sender() ! "ACCEPT_SENT"
+          probe ! "ACCEPT_SENT"
           Future.successful(HttpResponse(StatusCodes.OK))
         case _ => Future.failed(new Exception(s"unhandled call type ${call.getType}"))
       }
