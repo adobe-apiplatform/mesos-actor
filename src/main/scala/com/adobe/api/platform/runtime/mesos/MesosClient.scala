@@ -583,7 +583,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
                 case s @ Submitted(pending, taskInfo, offer, hostname, hostports, promise) =>
                   promise.failure(t)
                 case previousState =>
-                  log.warning(s"submitted a task that was not in Submitted? ${previousState}")
+                  log.warning(s"accepted a task that was not in Submitted? ${previousState}")
               }
             })
         }
@@ -595,7 +595,8 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
               val hostname =
                 event.getOffersList.asScala.find(p => p.getAgentId == task._1.getAgentId).get.getHostname
               tasks.update(reqs.taskId, Submitted(s, task._1, offerTasks._1, hostname, task._2, promise))
-
+            case previousState =>
+              log.warning(s"submitted a task that was not in SubmitPending? ${previousState}")
           }
         })
       }
