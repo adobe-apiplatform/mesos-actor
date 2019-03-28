@@ -182,6 +182,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   var heartbeatMonitor: Option[Cancellable] = None
   var heartbeatFailures: Int = 0
   var heldOffers: Map[OfferID, HeldOffer] = Map.empty
+  var pendingHeldOfferMatch: Boolean = false
   var stopping: Boolean = false
 
   var agentOfferHistory = Map.empty[String, AgentStats] // Map[<agent hostname> -> <stats>] track the most recent offer stats per agent hostname
@@ -253,8 +254,10 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     case SubmitTask(task) => {
       val taskPromise = Promise[Running]()
       tasks.update(task.taskId, SubmitPending(task, taskPromise))
-      //if we are allowed to hold offers, signal use of those immediately
-      if (config.holdOffers && heldOffers.nonEmpty) {
+      //if we are allowed to hold offers, signal use of those immediately, but only if not already signaled
+      val now = Instant.now()
+      if (config.holdOffers && heldOffers.nonEmpty && taskFitsHeldOffers(task) && !pendingHeldOfferMatch) {
+        pendingHeldOfferMatch = true
         //don't do offer matching here, or send the held offers (which may go away), rather trigger a separate offer cycle
         //that only uses the held offers
         self ! MatchHeldOffers
@@ -341,6 +344,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         sender() ! Future.successful({})
       }
     case MatchHeldOffers =>
+      pendingHeldOfferMatch = false //reset flag to allow signaling again
       if (heldOffers.nonEmpty) {
         log.info(s"attempting to use ${heldOffers.size} held offers")
         val heldOffersMessage = Event.Offers.newBuilder().addAllOffers(heldOffers.values.map(_.offer).asJava).build()
@@ -372,8 +376,10 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
           case MesosTaskState.TASK_STAGING | MesosTaskState.TASK_STARTING =>
             log.info(
               s"task still launching task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
-          case _ =>
-            log.warning(s"failing task ${event.getStatus.getTaskId.getValue}  msg: ${event.getStatus.getMessage}")
+          case t =>
+            log.warning(
+              s"failing task ${event.getStatus.getTaskId.getValue} exception: ${t}  msg: ${event.getStatus.getMessage}")
+            //if (event.getStatus.getMessage == "Container exited with status 125"
             promise.failure(
               new MesosException(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
         }
@@ -443,7 +449,9 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     }
     acknowledge(event.getStatus)
   }
-
+  def taskFitsHeldOffers(task: TaskDef): Boolean = {
+    taskMatcher.matchTasksToOffers(role, Seq(task), heldOffers.map(_._2.offer), taskBuilder)._1.nonEmpty
+  }
   def acknowledge(status: TaskStatus): Unit = {
     if (status.hasUuid) {
       val ack = Call

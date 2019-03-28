@@ -16,6 +16,7 @@ package com.adobe.api.platform.runtime.mesos.mesos
 
 import akka.actor.ActorRef
 import akka.actor.ActorSystem
+import akka.actor.Props
 import akka.actor.Status.Failure
 import akka.http.scaladsl.model.HttpResponse
 import akka.http.scaladsl.model.StatusCodes
