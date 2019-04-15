@@ -39,8 +39,8 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
     var result = Map[OfferID, Seq[(TaskInfo, Seq[Int])]]()
     val sortedOffers = o.toSeq.sortBy(
       _.getResourcesList.asScala
-        .find(_.getName == "cpus")
-        .map(-_.getScalar.getValue))
+        .find(_.getName == "mem")
+        .map(_.getScalar.getValue))
     var remaining: Map[OfferID, (Float, Float, Int)] = Map.empty
     sortedOffers.foreach(offer => {
       try {

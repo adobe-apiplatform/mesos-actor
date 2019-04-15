@@ -118,7 +118,7 @@
         "name": "mem",
         "type": "SCALAR",
         "scalar": {
-          "value": 2902.0
+          "value": 2901.0
         },
         "role": "*",
         "allocationInfo": {
@@ -169,7 +169,7 @@
         "value": "sample-11fdf320-311f-42b0-a284-dbc38bb8d191"
       },
       "agentId": {
-        "value": "db6b062d-84e3-4a2e-a8c5-98ffa944a304-S1"
+        "value": "db6b062d-84e3-4a2e-a8c5-98ffa944a304-S2"
       },
       "hostname": "192.168.99.102",
       "resources": [{
