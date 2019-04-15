@@ -90,7 +90,7 @@
       "agentId": {
         "value": "db6b062d-84e3-4a2e-a8c5-98ffa944a304-S1"
       },
-      "hostname": "192.168.99.100",
+      "hostname": "192.168.99.101",
       "resources": [{
         "name": "ports",
         "type": "RANGES",
@@ -171,7 +171,7 @@
       "agentId": {
         "value": "db6b062d-84e3-4a2e-a8c5-98ffa944a304-S1"
       },
-      "hostname": "192.168.99.100",
+      "hostname": "192.168.99.102",
       "resources": [{
         "name": "ports",
         "type": "RANGES",

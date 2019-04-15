@@ -135,13 +135,13 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
 
     taskMap.size shouldBe 2
     taskMap.keys.map(_.getValue) shouldBe Set(
-      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O58",
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O59",
       "7168e411-c3e4-4e29-b292-9b12eda4aaca-O60")
 
     remaining.map(r => r._1.getValue -> r._2) shouldBe Map(
-      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O58" -> (2656.0.toFloat, 0.3.toFloat, 198),
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O58" -> (2912.0.toFloat, 0.8.toFloat, 199),
       "7168e411-c3e4-4e29-b292-9b12eda4aaca-O60" -> (2646.0.toFloat, 0.4.toFloat, 198),
-      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O59" -> (2902.0.toFloat, 1.0.toFloat, 199))
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O59" -> (2646.0.toFloat, 0.5.toFloat, 198))
 
   }
 }
