@@ -415,8 +415,7 @@ class MesosClientTests
       case ("192.168.99.101", AgentStats(mem, cpus, ports, _)) =>
         cpus shouldBe 1.0
         ports shouldBe 199
-        mem shouldBe 2902.0
-
+        mem shouldBe 2901.0
       case ("192.168.99.102", AgentStats(mem, cpus, ports, _)) =>
         cpus shouldBe 0.9
         ports shouldBe 199
@@ -426,9 +425,13 @@ class MesosClientTests
 
     //wait for post accept
 
-    val agentId = AgentID
+    val agentId2 = AgentID
       .newBuilder()
       .setValue("db6b062d-84e3-4a2e-a8c5-98ffa944a304-S1")
+      .build()
+    val agentId3 = AgentID
+      .newBuilder()
+      .setValue("db6b062d-84e3-4a2e-a8c5-98ffa944a304-S2")
       .build()
     //receive the task details after successful launch
     system.log.info("sending UPDATE")
@@ -440,7 +443,7 @@ class MesosClientTests
           .newBuilder()
           .setTaskId(TaskID.newBuilder().setValue("taskId1"))
           .setState(TaskState.TASK_STAGING)
-          .setAgentId(agentId)
+          .setAgentId(agentId3)
           .build())
       .build()
     //verify that UPDATE was received
@@ -452,7 +455,7 @@ class MesosClientTests
           .newBuilder()
           .setTaskId(TaskID.newBuilder().setValue("taskId1"))
           .setState(TaskState.TASK_RUNNING)
-          .setAgentId(agentId)
+          .setAgentId(agentId3)
           .setHealthy(false)
           .build())
       .build()
@@ -470,7 +473,7 @@ class MesosClientTests
           .newBuilder()
           .setTaskId(TaskID.newBuilder().setValue("taskId1"))
           .setState(TaskState.TASK_RUNNING)
-          .setAgentId(agentId)
+          .setAgentId(agentId3)
           .setHealthy(true)
           .build())
       .build()
@@ -478,12 +481,13 @@ class MesosClientTests
       .newBuilder()
       .setTaskId(TaskID.newBuilder().setValue("taskId1"))
       .setState(TaskState.TASK_RUNNING)
-      .setAgentId(agentId)
+      .setAgentId(agentId3)
       .setHealthy(true)
       .build()
     //      val runningTaskInfo = ProtobufUtil.getTaskInfo("/taskdetails.json")
-    val expectedTaskDetails = Running("taskId1", agentId.getValue, runningTaskStatus, "192.168.99.101", List(11001))
+    val expectedTaskDetails = Running("taskId1", agentId3.getValue, runningTaskStatus, "192.168.99.102", List(11001))
 
+    //TODO match the tasks in order of receipt!
     expectMsg(expectedTaskDetails)
 
   }
@@ -531,7 +535,7 @@ class MesosClientTests
       case ("192.168.99.101", AgentStats(mem, cpus, ports, _)) =>
         cpus shouldBe 1.0
         ports shouldBe 199
-        mem shouldBe 2902.0
+        mem shouldBe 2901.0
 
       case ("192.168.99.102", AgentStats(mem, cpus, ports, _)) =>
         cpus shouldBe 0.9
@@ -542,9 +546,13 @@ class MesosClientTests
 
     //wait for post accept
 
-    val agentId = AgentID
+    val agentId2 = AgentID
       .newBuilder()
       .setValue("db6b062d-84e3-4a2e-a8c5-98ffa944a304-S1")
+      .build()
+    val agentId3 = AgentID
+      .newBuilder()
+      .setValue("db6b062d-84e3-4a2e-a8c5-98ffa944a304-S2")
       .build()
     //receive the task details after successful launch
     system.log.info("sending UPDATE")
@@ -556,7 +564,7 @@ class MesosClientTests
           .newBuilder()
           .setTaskId(TaskID.newBuilder().setValue("taskId1"))
           .setState(TaskState.TASK_STAGING)
-          .setAgentId(agentId)
+          .setAgentId(agentId2)
           .build())
       .build()
     //verify that UPDATE was received
@@ -568,7 +576,7 @@ class MesosClientTests
           .newBuilder()
           .setTaskId(TaskID.newBuilder().setValue("taskId1"))
           .setState(TaskState.TASK_RUNNING)
-          .setAgentId(agentId)
+          .setAgentId(agentId2)
           .setHealthy(false)
           .build())
       .build()
@@ -586,7 +594,7 @@ class MesosClientTests
           .newBuilder()
           .setTaskId(TaskID.newBuilder().setValue("taskId1"))
           .setState(TaskState.TASK_RUNNING)
-          .setAgentId(agentId)
+          .setAgentId(agentId2)
           .setHealthy(true)
           .build())
       .build()
@@ -594,10 +602,10 @@ class MesosClientTests
       .newBuilder()
       .setTaskId(TaskID.newBuilder().setValue("taskId1"))
       .setState(TaskState.TASK_RUNNING)
-      .setAgentId(agentId)
+      .setAgentId(agentId2)
       .setHealthy(true)
       .build()
-    val expectedTaskDetails = Running("taskId1", agentId.getValue, runningTaskStatus, "192.168.99.101", List(11001))
+    val expectedTaskDetails = Running("taskId1", agentId2.getValue, runningTaskStatus, "192.168.99.101", List(11001))
 
     expectMsg(expectedTaskDetails)
 

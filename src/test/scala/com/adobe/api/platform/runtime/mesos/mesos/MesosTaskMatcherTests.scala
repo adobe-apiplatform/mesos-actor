@@ -124,12 +124,12 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
     taskMap.values.flatten.map(_._1.getTaskId.getValue) shouldBe List("taskId2", "taskId3", "taskId4", "taskId5")
 
   }
-  it should "only use the (multiple) slaves with least available cpus" in {
+  it should "only use the (multiple) slaves with least available mem" in {
     val offers = ProtobufUtil.getOffers("/offer-multiple.json")
 
     val tasks = List[TaskDef](
       TaskDef("taskId", "taskName", "dockerImage:someTag", 0.5, 256, List(8080)),
-      TaskDef("taskId2", "taskName2", "dockerImage:someTag2", 0.5, 256, List(8080)))
+      TaskDef("taskId2", "taskName2", "dockerImage:someTag2", 0.6, 256, List(8080)))
     val (taskMap, remaining) =
       new DefaultTaskMatcher().matchTasksToOffers("*", tasks, offers.getOffersList.asScala, new DefaultTaskBuilder())
 
@@ -140,8 +140,8 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
 
     remaining.map(r => r._1.getValue -> r._2) shouldBe Map(
       "7168e411-c3e4-4e29-b292-9b12eda4aaca-O58" -> (2912.0.toFloat, 0.8.toFloat, 199),
-      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O60" -> (2646.0.toFloat, 0.4.toFloat, 198),
-      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O59" -> (2646.0.toFloat, 0.5.toFloat, 198))
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O59" -> (2645.0.toFloat, 0.5.toFloat, 198),
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O60" -> (2646.0.toFloat, 0.3.toFloat, 198))
 
   }
 }
