@@ -75,6 +75,7 @@ case class SubscribeComplete(id: String)
 case object TeardownComplete
 
 case class TaskRecoveryDetail(taskId: String, agentId: String)
+case class TaskRecoveryLaunchDetail(taskId: String)
 
 case object Heartbeat
 
@@ -207,7 +208,11 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
           })
           reconcile(recoveryData)
         }
-
+        //we also may have unlaunched tasks that should proceed with launch as part of autosubscribe process
+        val toLaunchAtReconcile = tasks.reconcilePendingData
+        toLaunchAtReconcile.foreach { t =>
+          self ! SubmitTask(t._2.taskDef)
+        }
       })
   }
   case object PruneStats

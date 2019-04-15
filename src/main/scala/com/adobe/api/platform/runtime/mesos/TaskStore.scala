@@ -22,7 +22,6 @@ import akka.actor.ActorLogging
 import akka.actor.ActorSystem
 import akka.actor.Props
 import akka.cluster.Cluster
-import akka.cluster.ClusterEvent
 import akka.cluster.ddata.DistributedData
 import akka.cluster.ddata.Key
 import akka.cluster.ddata.LWWMapKey
@@ -33,9 +32,12 @@ import akka.cluster.ddata.Replicator
 import akka.pattern.ask
 import akka.util.Timeout
 import com.adobe.api.platform.runtime.mesos.ReplicatedCache.GetReconcileData
+import com.adobe.api.platform.runtime.mesos.ReplicatedCache.GetReconcilePendingData
 import com.adobe.api.platform.runtime.mesos.ReplicatedCache.Register
+import com.adobe.api.platform.runtime.mesos.ReplicatedCache.RegisterPending
 import com.adobe.api.platform.runtime.mesos.ReplicatedCache.TaskDataKey
 import com.adobe.api.platform.runtime.mesos.ReplicatedCache.UnRegister
+import com.adobe.api.platform.runtime.mesos.ReplicatedCache.UnRegisterPending
 import scala.collection.immutable
 import scala.collection.mutable
 import scala.concurrent.Await
@@ -46,6 +48,7 @@ import scala.concurrent.duration._
  */
 trait TaskStore extends immutable.Map[String, TaskState] {
   def reconcileData: Map[String, ReconcileTaskState]
+  def reconcilePendingData: Map[String, ReconcilePending]
   def update(taskId: String, taskState: TaskState)
   def remove(taskId: String)
   protected val tasks = mutable.Map[String, TaskState]()
@@ -57,13 +60,11 @@ trait TaskStore extends immutable.Map[String, TaskState] {
 class LocalTaskStore extends TaskStore {
 
   def reconcileData: Map[String, ReconcileTaskState] =
-    tasks
-      .collect({
-        case (_, Running(taskId, agentId, _, hostname, hostports)) =>
-          (taskId, ReconcileTaskState(agentId, hostname, hostports))
+    Map.empty
 
-      })
-      .toMap
+  def reconcilePendingData: Map[String, ReconcilePending] =
+    Map.empty
+
   override def update(taskId: String, taskState: TaskState): Unit = tasks.update(taskId, taskState)
 
   override def remove(taskId: String): Unit = tasks.remove(taskId)
@@ -89,11 +90,21 @@ class DistributedDataTaskStore(as: ActorSystem)(implicit cluster: Cluster) exten
   def reconcileData =
     Await.result((cacheActor ? GetReconcileData)(Timeout(5.seconds)).mapTo[Map[String, ReconcileTaskState]], 5.seconds)
 
+  def reconcilePendingData =
+    Await.result(
+      (cacheActor ? GetReconcilePendingData)(Timeout(5.seconds)).mapTo[Map[String, ReconcilePending]],
+      5.seconds)
+
   override def update(taskId: String, taskState: TaskState) = {
     //capture the current taskState for local usage
     tasks += (taskId -> taskState)
     //if its Running, replicate the cache state for reconciliation needs
     taskState match {
+      case SubmitPending(taskDef, _, _) =>
+        cacheActor ! RegisterPending(taskId, ReconcilePending(taskDef))
+      case Submitted(_, taskInfo, offer, host, hostPorts, _) =>
+        cacheActor ! UnRegisterPending(taskId) //no longer pending, so don't track with pending data
+        cacheActor ! Register(taskId, ReconcileTaskState(taskInfo.getAgentId.getValue, host, hostPorts))
       case Running(taskInfo, agentId, _, hostname, hostports) =>
         cacheActor ! Register(taskId, ReconcileTaskState(agentId, hostname, hostports))
       case _ => //nothing
@@ -133,20 +144,37 @@ case class ReconcileTaskState(val agentId: String, val hostname: String, val hos
     this
 }
 
+/**
+ * Replicated data type for unlaunched tasks
+ * @param taskDef
+ */
+case class ReconcilePending(taskDef: TaskDef) extends ReplicatedData with Serializable {
+  override type T = this.type
+  override def merge(that: ReconcilePending.this.type) =
+    //no merging supported, just return this; we only have 1 writer at any time, so merging should not happen
+    this
+}
+
 private object ReplicatedCache {
   final case object GetReconcileData
+  final case object GetReconcilePendingData
   final case class Register(taskId: String, taskState: ReconcileTaskState)
+  final case class RegisterPending(taskId: String, taskDef: ReconcilePending)
   final case class UnRegister(taskId: String)
+  final case class UnRegisterPending(taskId: String)
 
   final case class TaskDataKey(taskId: String) extends Key[ORMap[String, ReconcileTaskState]](taskId)
   //the key for the reconciliation data
   private val RecoveryDataKey = ORMapKey[TaskDataKey, ReconcileTaskState]("task-recovery-data")
+  //the key for unlaunched/pending data
+  private val RecoveryPendingDataKey = ORMapKey[TaskDataKey, ReconcilePending]("task-recovery-pending-data")
   def props()(implicit cluster: Cluster) = Props(new ReplicatedCache())
 }
 
 private class ReplicatedCache()(implicit val cluster: Cluster) extends Actor with ActorLogging {
   val replicator = DistributedData(context.system).replicator
   var cachedData = Map.empty[String, ReconcileTaskState]
+  var cachedPendingData = Map.empty[String, ReconcilePending]
   def taskDataKey(taskId: String): TaskDataKey = TaskDataKey(taskId)
 
   override def preStart(): Unit = {
@@ -160,18 +188,40 @@ private class ReplicatedCache()(implicit val cluster: Cluster) extends Actor wit
   def receive = {
     case GetReconcileData =>
       sender() ! cachedData
+    case GetReconcilePendingData =>
+      sender() ! cachedPendingData
     case Register(taskId, taskState) =>
       replicator ! Replicator.Update(
         ReplicatedCache.RecoveryDataKey,
         ORMap.empty[TaskDataKey, ReconcileTaskState],
         Replicator.WriteLocal)(_ + (taskDataKey(taskId), taskState))
+    case RegisterPending(taskId, taskDef) =>
+      replicator ! Replicator.Update(
+        ReplicatedCache.RecoveryPendingDataKey,
+        ORMap.empty[TaskDataKey, ReconcilePending],
+        Replicator.WriteLocal)(_ + (taskDataKey(taskId), taskDef))
     case UnRegister(taskId) =>
       replicator ! Replicator.Update(
         ReplicatedCache.RecoveryDataKey,
         ORMap.empty[TaskDataKey, ReconcileTaskState],
         Replicator.WriteLocal)(_ - taskDataKey(taskId))
+      //in case a task is deleted before it was running, also cleanup the pending taskDef
+      if (cachedPendingData.keySet.contains(taskId)) {
+        replicator ! Replicator.Update(
+          ReplicatedCache.RecoveryPendingDataKey,
+          ORMap.empty[TaskDataKey, ReconcilePending],
+          Replicator.WriteLocal)(_ - taskDataKey(taskId))
+      }
+    case UnRegisterPending(taskId) =>
+      replicator ! Replicator.Update(
+        ReplicatedCache.RecoveryPendingDataKey,
+        ORMap.empty[TaskDataKey, ReconcilePending],
+        Replicator.WriteLocal)(_ - taskDataKey(taskId))
     case c @ Replicator.Changed(ReplicatedCache.RecoveryDataKey) =>
       cachedData = c.get(ReplicatedCache.RecoveryDataKey).entries.map(e => (e._1.id -> e._2))
+      log.debug(s"new cache data value ${cachedData}")
+    case c @ Replicator.Changed(ReplicatedCache.RecoveryPendingDataKey) =>
+      cachedPendingData = c.get(ReplicatedCache.RecoveryPendingDataKey).entries.map(e => (e._1.id -> e._2))
       log.debug(s"new cache data value ${cachedData}")
 
   }
