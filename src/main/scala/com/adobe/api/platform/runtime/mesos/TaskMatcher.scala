@@ -37,10 +37,16 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
 
     var tasksInNeed: ListBuffer[TaskDef] = t.to[ListBuffer]
     var result = Map[OfferID, Seq[(TaskInfo, Seq[Int])]]()
-    val sortedOffers = o.toSeq.sortBy(
-      _.getResourcesList.asScala
-        .find(_.getName == "mem")
-        .map(_.getScalar.getValue))
+
+    val sortedOffers = o
+      .filter(o => o.getResourcesList.asScala.exists(_.getRole == role)) //filter out offers that don't have at least one resource with this role
+      .toSeq //convert to sequence for sorting
+      .sortBy(
+        _.getResourcesList.asScala
+          .filter(_.getRole == role)
+          .find(_.getName == "mem")
+          .map(_.getScalar.getValue))
+    logger.info(s"sorted offers ${sortedOffers.map(_.getHostname)}")
     var remaining: Map[OfferID, (Float, Float, Int)] = Map.empty
     sortedOffers.foreach(offer => {
       try {

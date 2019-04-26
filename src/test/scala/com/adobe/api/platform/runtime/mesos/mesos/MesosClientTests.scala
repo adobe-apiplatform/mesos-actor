@@ -230,7 +230,8 @@ class MesosClientTests
         List(8080),
         healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
         commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
-    //receive 3 empty offers (default max offers is 2, then capacity failure)
+    //receive 4 empty offers (configured max offers is 3, then capacity failure)
+    mesosClient ! ProtobufUtil.getOffers("/emptyoffer.json")
     mesosClient ! ProtobufUtil.getOffers("/emptyoffer.json")
     mesosClient ! ProtobufUtil.getOffers("/emptyoffer.json")
     mesosClient ! ProtobufUtil.getOffers("/emptyoffer.json")
@@ -550,10 +551,7 @@ class MesosClientTests
       .newBuilder()
       .setValue("db6b062d-84e3-4a2e-a8c5-98ffa944a304-S1")
       .build()
-    val agentId3 = AgentID
-      .newBuilder()
-      .setValue("db6b062d-84e3-4a2e-a8c5-98ffa944a304-S2")
-      .build()
+
     //receive the task details after successful launch
     system.log.info("sending UPDATE")
 
@@ -616,7 +614,7 @@ class MesosClientTests
         "taskId2",
         "fake-docker-image",
         0.1,
-        2500,
+        2500, //matches 102 agent -> 412mb remain
         List(8080),
         healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
         commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
@@ -626,11 +624,13 @@ class MesosClientTests
         "taskId3",
         "fake-docker-image",
         0.1,
-        256,
+        2000, //matches 100 agent -> 912mb remain
         List(8080),
         healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
         commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
 
+    //sending an empty offer will trigger reuse of held offers also, and since even though the held offer is least used node, it will get used after 3 offer cycles regardless
+    mesosClient ! ProtobufUtil.getOffers("/emptyoffer.json")
     expectMsg("ACCEPT_SENT")
     expectMsg("ACCEPT_SENT")
   }
@@ -650,7 +650,7 @@ class MesosClientTests
     override val tasks: TaskStore = new LocalTaskStore
     override val refuseSeconds: Double = 1.0
     override val heartbeatMaxFailures: Int = 2
-    override val config = MesosActorConfig(5.seconds, 30.seconds, Some(2), true, 5.seconds, 30.seconds)
+    override val config = MesosActorConfig(5.seconds, 30.seconds, Some(3), true, 5.seconds, 30.seconds, true)
 
     override def exec(call: Call): Future[HttpResponse] = {
       log.info(s"sending ${call.getType}")

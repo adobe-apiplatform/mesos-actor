@@ -81,7 +81,8 @@ trait MesosClientHttpConnection extends MesosClientConnection {
     queue.offer(req, responsePromise)
     responsePromise.future
   }
-
+  private val hostname
+    : String = sys.env.get("LIBPROCESS_IP").getOrElse(java.net.InetAddress.getLocalHost.getHostName) //shows in mesos ui->Frameworks->Host
   def subscribe(frameworkID: FrameworkID,
                 frameworkName: String,
                 failoverTimeoutSecond: Double): Future[SubscribeComplete] = {
@@ -101,6 +102,7 @@ trait MesosClientHttpConnection extends MesosClientConnection {
               .setId(frameworkID)
               .setUser(Optional.ofNullable(System.getenv("user")).orElse("root")) // https://issues.apache.org/jira/browse/MESOS-3747
               .setName(frameworkName)
+              .setHostname(hostname)
               .setFailoverTimeout(failoverTimeoutSeconds.toSeconds)
               .setRole(role)
               .build)

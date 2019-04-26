@@ -147,7 +147,8 @@ case class MesosActorConfig(agentStatsTTL: FiniteDuration,
                             failPendingOfferCycles: Option[Int],
                             holdOffers: Boolean,
                             holdOffersTTL: FiniteDuration,
-                            holdOffersPruningPeriod: FiniteDuration)
+                            holdOffersPruningPeriod: FiniteDuration,
+                            waitForPreferredAgent: Boolean)
 case class AgentStats(mem: Double, cpu: Double, ports: Int, expiration: Instant)
 
 case class MesosAgentStats(stats: Map[String, AgentStats])
@@ -183,6 +184,8 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   var heartbeatMonitor: Option[Cancellable] = None
   var heartbeatFailures: Int = 0
   var heldOffers: Map[OfferID, HeldOffer] = Map.empty
+  var waitForAgent
+    : Option[String] = None //when set, offers will be skipped until we see an offer from this specific agent, OR some offers are reaching their max offer cycles
   var pendingHeldOfferMatch: Boolean = false
   var stopping: Boolean = false
 
@@ -260,8 +263,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       val taskPromise = Promise[Running]()
       tasks.update(task.taskId, SubmitPending(task, taskPromise))
       //if we are allowed to hold offers, signal use of those immediately, but only if not already signaled
-      val now = Instant.now()
-      if (config.holdOffers && heldOffers.nonEmpty && taskFitsHeldOffers(task) && !pendingHeldOfferMatch) {
+      if (config.holdOffers && taskFitsHeldOffers(task) && !pendingHeldOfferMatch) {
         pendingHeldOfferMatch = true
         //don't do offer matching here, or send the held offers (which may go away), rather trigger a separate offer cycle
         //that only uses the held offers
@@ -349,11 +351,12 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         sender() ! Future.successful({})
       }
     case MatchHeldOffers =>
-      pendingHeldOfferMatch = false //reset flag to allow signaling again
-      if (heldOffers.nonEmpty) {
+      pendingHeldOfferMatch = false //reset flag to allow signaling again (would be better as FSM)
+      //use held offers IFF we have held offers AND either a) matching waitForAgent or b) empty waitForAgent
+      if (heldOffers.nonEmpty && waitForAgent.forall(h => heldOffers.values.map(_.offer.getHostname).exists(_ == h))) {
         log.info(s"attempting to use ${heldOffers.size} held offers")
-        val heldOffersMessage = Event.Offers.newBuilder().addAllOffers(heldOffers.values.map(_.offer).asJava).build()
-        handleOffers(heldOffersMessage)
+        //send empty offer list (held offers will be merged within handleOffers)
+        handleOffers(Event.Offers.getDefaultInstance)
       }
     case msg => log.warning(s"unknown msg: ${msg}")
   }
@@ -506,9 +509,20 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     super.postRestart(reason)
   }
 
-  def handleOffers(event: Event.Offers) = {
-
-    log.debug(s"received ${event.getOffersList.size} offers: ${toCompactJsonString(event);}")
+  def handleOffers(newOffers: Event.Offers) = {
+    //merge held offers into any offers just received
+    val event =
+      if (heldOffers.nonEmpty) {
+        log.info(s"including ${heldOffers.size} held offers ")
+        val heldOffersEvent = Event.Offers.newBuilder().addAllOffers(heldOffers.map(_._2.offer).asJava).build()
+        Event.Offers
+          .newBuilder()
+          .addAllOffers(newOffers.getOffersList)
+          .addAllOffers(heldOffersEvent.getOffersList)
+          .build()
+      } else {
+        newOffers
+      }
 
     val agentOfferMap = event.getOffersList.asScala
       .map(o => o -> o.getResourcesList.asScala.filter(_.getRole == role).groupBy(_.getName)) //map hostname to resource map including only resources allocated to this role
@@ -527,11 +541,42 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
 
       log.debug(s"agent offer stats: {}", agentOfferHistory)
 
-      val (matchedTasks, remaining) =
+      //if new offers include agent that we are waiting for, clear the wait state
+      waitForAgent.foreach { w =>
+        if (event.getOffersList.asScala.exists(_.getHostname == w)) {
+          log.info(s"resetting waitForAgent since we received an offer on ${w}")
+          waitForAgent = None
+        } else {
+          //if any tasks are close to expiring, clear the wait state
+          val countAtLimit = countPendingAtOfferCycleLimit()
+          if (countAtLimit > 0) {
+            log.info(s"resetting waitForAgent since ${countAtLimit} pending tasks are at offer cycle limit")
+            waitForAgent = None
+          }
+        }
+      }
+
+      val (matchedTasks, remaining) = if (pending.nonEmpty && waitForAgent.isEmpty) {
         taskMatcher.matchTasksToOffers(role, pending, event.getOffersList.asScala.toList, taskBuilder)
+      } else {
+        waitForAgent.foreach(w => log.info(s"skipping offers due to waitForAgent ${w}"))
+        //TODO: do not return empty map, it may cause errors on maxBy in caller!
+        (Map.empty[OfferID, Seq[(TaskInfo, Seq[Int])]], Map.empty[OfferID, (Float, Float, Int)])
+      }
+
+      if (matchedTasks.nonEmpty && config.waitForPreferredAgent) {
+        val smallestRemainingOfferId = remaining.toSeq.minBy(_._2._1)._1
+        waitForAgent = agentOfferMap.keySet.find(_.getId == smallestRemainingOfferId).map(_.getHostname)
+        log.info(s"setting waitForAgent to ${waitForAgent}")
+      } else {
+        //leave waitForAgent unchanged
+      }
 
       val matchedCount = matchedTasks.foldLeft(0)(_ + _._2.size)
-      log.info(s"matched ${matchedCount} tasks to ${matchedTasks.size} offers out of ${pending.size} pending tasks")
+      val matchedOrNone = if (matchedCount > 0) "MATCHED" else "NOMATCHES"
+      val pendingOrNone = if (pending.size > 0) "PENDING" else "NOPENDINGS"
+      log.info(
+        s"${matchedOrNone} ${pendingOrNone} matched ${matchedCount} tasks to ${matchedTasks.size} offers out of ${pending.size} pending tasks")
 
       //debugging logs
       pending.foreach(reqs => {
@@ -549,19 +594,22 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       //Decline the offers not selected. Sometimes these just stay dangling in mesos outstanding offers
       val unusedOfferIds =
         asScalaBuffer(event.getOffersList).map(offer => offer.getId).filter(!matchedTasks.contains(_))
+      //do not refill heldOffers if we are stopping
+      heldOffers = Map.empty
       if (config.holdOffers && !stopping) { //handle held offers
-        //remove matched offers
-        val matchedOffers = matchedTasks.keySet
-        heldOffers = heldOffers -- matchedOffers //remove matched offers from heldOffers
-
         //add remaining unused offers
-        if (unusedOfferIds.nonEmpty) {
+        if (unusedOfferIds.nonEmpty && config.holdOffers) {
           val now = Instant.now()
-          //find the usable ones
+          //find the usable ones but if this offer host is the least used host, do not hold it...
           val usableUnusedOffers =
-            agentOfferMap.filter(a => unusedOfferIds.contains(a._1.getId) && !matchedOffers.contains(a._1.getId))
-          if (usableUnusedOffers.size > 0) {
-            logger.info(s"holding ${usableUnusedOffers.size} unused offers")
+            agentOfferMap.filter(
+              a =>
+                unusedOfferIds.contains(a._1.getId) && !matchedTasks.keySet
+                  .contains(a._1.getId))
+          //we may hold offers that were not accepted, but if we are waiting for a specific agent they wouldn't be used anyways...
+          if (usableUnusedOffers.nonEmpty) {
+            logger.info(
+              s"holding ${usableUnusedOffers.size} unused offers: ${usableUnusedOffers.map(_._1.getHostname)}")
             //save the usable ones
             usableUnusedOffers.foreach(
               o =>
@@ -573,7 +621,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
           //remove the usable from unused
           val unusableUnusedOfferIds = unusedOfferIds -- heldOffers.keys
           //decline unused - usableUnused
-          if (unusableUnusedOfferIds.size > 0) {
+          if (unusableUnusedOfferIds.nonEmpty) {
             logger.info(s"declining ${unusableUnusedOfferIds.size} unused or unusable offers")
             declineOffers(unusableUnusedOfferIds)
           }
@@ -824,6 +872,8 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         if (heldOffers.keySet.contains(rescinded)) {
           logger.info(s"removing held offer id ${rescinded.getValue} on rescind")
           heldOffers = heldOffers - rescinded
+        } else {
+          logger.warning(s"unknown offer rescinded ${rescinded.getValue}")
         }
       case Event.Type.FAILURE => logger.warning(s"received failure message ${event.getFailure}")
       case Event.Type.ERROR   => logger.error(s"received error ${event.getError}")
@@ -833,6 +883,16 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   }
   def toCompactJsonString(message: com.google.protobuf.Message) =
     JsonFormat.printer.omittingInsignificantWhitespace.print(message)
+
+  private def countPendingAtOfferCycleLimit() = {
+    config.failPendingOfferCycles
+      .map { maxOfferCycles =>
+        tasks
+          .collect { case (_, s: SubmitPending) => s }
+          .count(_.offerCycles > math.max(1, maxOfferCycles - 1))
+      }
+      .getOrElse(0)
+  }
 }
 
 class MesosClient(val id: () => String,
