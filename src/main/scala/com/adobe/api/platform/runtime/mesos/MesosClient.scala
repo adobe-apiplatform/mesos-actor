@@ -604,11 +604,10 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
           val usableUnusedOffers =
             agentOfferMap.filter(
               a =>
-                //TODO: consider current offerset to determine least used! (during restart)
                 unusedOfferIds.contains(a._1.getId) && !matchedTasks.keySet
                   .contains(a._1.getId))
           //we may hold offers that were not accepted, but if we are waiting for a specific agent they wouldn't be used anyways...
-          if (usableUnusedOffers.nonEmpty) { //don't let held offers trigger offer cycles if we are waiting for a specific agent offer
+          if (usableUnusedOffers.nonEmpty) {
             logger.info(
               s"holding ${usableUnusedOffers.size} unused offers: ${usableUnusedOffers.map(_._1.getHostname)}")
             //save the usable ones
