@@ -147,7 +147,8 @@ case class MesosActorConfig(agentStatsTTL: FiniteDuration,
                             failPendingOfferCycles: Option[Int],
                             holdOffers: Boolean,
                             holdOffersTTL: FiniteDuration,
-                            holdOffersPruningPeriod: FiniteDuration)
+                            holdOffersPruningPeriod: FiniteDuration,
+                            waitForPreferredAgent: Boolean)
 case class AgentStats(mem: Double, cpu: Double, ports: Int, expiration: Instant)
 
 case class MesosAgentStats(stats: Map[String, AgentStats])
@@ -563,17 +564,10 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         (Map.empty[OfferID, Seq[(TaskInfo, Seq[Int])]], Map.empty[OfferID, (Float, Float, Int)])
       }
 
-//      //if we matched to a single offer (single host), skip use of held offers till next offer cycle
-//      if (matchedTasks.size == 1) { //we assume that the` precise match is not consuming all resources
-//        waitForAgent = agentOfferMap.keySet.find(_.getId == matchedTasks.head._1).map(_.getHostname)
-//        log.info(s"setting waitForAgent to ${waitForAgent}")
-//      } else
-//
-      if (matchedTasks.nonEmpty) {
+      if (matchedTasks.nonEmpty && config.waitForPreferredAgent) {
         val smallestRemainingOfferId = remaining.toSeq.minBy(_._2._1)._1
         waitForAgent = agentOfferMap.keySet.find(_.getId == smallestRemainingOfferId).map(_.getHostname)
         log.info(s"setting waitForAgent to ${waitForAgent}")
-
       } else {
         //leave waitForAgent unchanged
       }
@@ -601,11 +595,8 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       val unusedOfferIds =
         asScalaBuffer(event.getOffersList).map(offer => offer.getId).filter(!matchedTasks.contains(_))
       //do not refill heldOffers if we are stopping
-      heldOffers = Map.empty //heldOffers -- matchedOffers //remove matched offers from heldOffers
+      heldOffers = Map.empty
       if (config.holdOffers && !stopping) { //handle held offers
-//        //remove matched offers
-//        val matchedOffers = matchedTasks.keySet
-
         //add remaining unused offers
         if (unusedOfferIds.nonEmpty && config.holdOffers) {
           val now = Instant.now()
@@ -893,13 +884,6 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   }
   def toCompactJsonString(message: com.google.protobuf.Message) =
     JsonFormat.printer.omittingInsignificantWhitespace.print(message)
-
-  //return true if this host has largest amount of available resources
-  private def isLeastUsed(hostname: String): Boolean = {
-    val leastUsed = agentOfferHistory.size > 1 && agentOfferHistory.toList.minBy(-_._2.mem)._1 == hostname
-    if (leastUsed) log.info(s"offer is on least used agent ${hostname}")
-    leastUsed
-  }
 
   private def countPendingAtOfferCycleLimit() = {
     config.failPendingOfferCycles
