@@ -27,11 +27,19 @@ import scala.collection.mutable.Buffer
 import scala.collection.mutable.ListBuffer
 
 trait TaskMatcher {
-  def matchTasksToOffers(role: String, t: Iterable[TaskDef], o: Iterable[Offer], builder: TaskBuilder)(
+  def matchTasksToOffers(role: String,
+                         t: Iterable[TaskDef],
+                         o: Iterable[Offer],
+                         builder: TaskBuilder,
+                         portBlacklist: Map[String, Seq[Int]])(
     implicit logger: LoggingAdapter): (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)])
 }
 class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatcher {
-  override def matchTasksToOffers(role: String, t: Iterable[TaskDef], o: Iterable[Offer], builder: TaskBuilder)(
+  override def matchTasksToOffers(role: String,
+                                  t: Iterable[TaskDef],
+                                  o: Iterable[Offer],
+                                  builder: TaskBuilder,
+                                  portBlacklist: Map[String, Seq[Int]])(
     implicit logger: LoggingAdapter): (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)]) = {
     //we can launch many tasks on a single offer
 
@@ -105,7 +113,11 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
               })
               logger.debug(s"constraintChecks ${constraintChecks}")
               //pluck the number of ports needed for this task
-              val hostPorts = pluckPorts(offerPortsRanges, task.ports.size, usedPorts)
+              val hostPorts = pluckPorts(
+                offerPortsRanges,
+                task.ports.size,
+                usedPorts ++ portBlacklist
+                  .getOrElse(offer.getHostname, Seq.empty)) //exclude used ports and blacklisted ports
               val matchedResources = remainingOfferCpus > taskCpus &&
                 remainingOfferMem > taskMem &&
                 hostPorts.size == task.ports.size

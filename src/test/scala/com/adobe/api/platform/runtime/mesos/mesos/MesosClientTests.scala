@@ -603,7 +603,7 @@ class MesosClientTests
       .setAgentId(agentId2)
       .setHealthy(true)
       .build()
-    val expectedTaskDetails = Running("taskId1", agentId2.getValue, runningTaskStatus, "192.168.99.101", List(11001))
+    val expectedTaskDetails = Running("taskId1", agentId2.getValue, runningTaskStatus, "192.168.99.101", List(12001))
 
     expectMsg(expectedTaskDetails)
 
@@ -634,6 +634,100 @@ class MesosClientTests
     expectMsg("ACCEPT_SENT")
     expectMsg("ACCEPT_SENT")
   }
+
+  it should "throw a DockerFailureException when docker run exits with 125 status" in {
+
+    val mesosClient = TestActorRef(new TestMesosClientActor(id, probe = this.testActor))
+
+    //subscribe
+    mesosClient ! Subscribe
+    mesosClient
+      .ask(Subscribe)(Timeout(1.second))
+      .mapTo[SubscribeComplete]
+      .onComplete(complete => {
+        system.log.info("subscribe completed successfully...")
+      })
+    expectMsg(subscribeCompleteMsg)
+
+    //submit the task
+    mesosClient ! SubmitTask(
+      TaskDef(
+        "taskId1",
+        "taskId1",
+        "fake-docker-image",
+        0.1,
+        256,
+        List(8080),
+        healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
+        commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
+    //receive offers
+    mesosClient ! ProtobufUtil.getOffers("/offer1.json")
+
+    //verify that ACCEPT was sent
+    expectMsg("ACCEPT_SENT")
+    //wait for post accept
+
+    val agentId = AgentID
+      .newBuilder()
+      .setValue("db6b062d-84e3-4a2e-a8c5-98ffa944a304-S0")
+      .build()
+    //receive the task details after successful launch
+    system.log.info("sending UPDATE")
+
+    mesosClient ! org.apache.mesos.v1.scheduler.Protos.Event.Update
+      .newBuilder()
+      .setStatus(
+        TaskStatus
+          .newBuilder()
+          .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+          .setState(TaskState.TASK_STAGING)
+          .setAgentId(agentId)
+          .build())
+      .build()
+    //verify that UPDATE was received
+
+    mesosClient ! org.apache.mesos.v1.scheduler.Protos.Event.Update
+      .newBuilder()
+      .setStatus(
+        TaskStatus
+          .newBuilder()
+          .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+          .setState(TaskState.TASK_FAILED)
+          .setMessage(MesosClient.DOCKER_RUN_FAILURE_MESSAGE)
+          .setAgentId(agentId)
+          .setHealthy(false)
+          .build())
+      .build()
+
+    //verify that UPDATE was received
+    //verify that task is in RUNNING (but NOT healthy) state
+
+    //verify that UPDATE was received
+    //verify that task is in RUNNING (AND healthy) state
+
+    mesosClient ! org.apache.mesos.v1.scheduler.Protos.Event.Update
+      .newBuilder()
+      .setStatus(
+        TaskStatus
+          .newBuilder()
+          .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+          .setState(TaskState.TASK_RUNNING)
+          .setAgentId(agentId)
+          .setHealthy(true)
+          .build())
+      .build()
+    val runningTaskStatus = TaskStatus
+      .newBuilder()
+      .setTaskId(TaskID.newBuilder().setValue("taskId1"))
+      .setState(TaskState.TASK_RUNNING)
+      .setAgentId(agentId)
+      .setHealthy(true)
+      .build()
+
+    expectMsg(Failure(DockerLaunchFailure(MesosClient.DOCKER_RUN_FAILURE_MESSAGE)))
+
+  }
+
   class TestMesosClientActor(override val id: () => String,
                              override val listener: Option[ActorRef] = None,
                              probe: ActorRef)

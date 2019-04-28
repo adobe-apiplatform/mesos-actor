@@ -159,6 +159,8 @@ case class CapacityFailure(requiredMem: Float,
                            remainingResources: List[(Float, Float, Int)])
     extends MesosException("cluster does not have capacity")
 
+case class DockerLaunchFailure(msg: String) extends MesosException(s"docker launch failed: $msg")
+
 case class HeldOffer(offer: Offer, expiration: Instant)
 
 //TODO: mesos authentication
@@ -193,6 +195,8 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   val listener: Option[ActorRef]
 
   val config: MesosActorConfig
+
+  var portsBlacklist: Map[String, Seq[Int]] = Map.empty
 
   if (autoSubscribe) {
     log.info(s"auto-subscribing ${self} to mesos master at ${master}")
@@ -384,10 +388,22 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
           case MesosTaskState.TASK_STAGING | MesosTaskState.TASK_STARTING =>
             log.info(
               s"task still launching task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
+          case MesosTaskState.TASK_FAILED if event.getStatus.getMessage == MesosClient.DOCKER_RUN_FAILURE_MESSAGE =>
+            log.warning(toCompactJsonString(event))
+            val port = hostports.headOption.getOrElse(0)
+            log.warning(
+              s"docker run failed for task ${event.getStatus.getTaskId.getValue} at $hostname:$port; port will be blacklisted; msg: ${event.getStatus.getMessage}")
+            //update the blacklist
+            val hostPortBlacklist = portsBlacklist.getOrElse(hostname, Seq.empty) :+ port
+            portsBlacklist = portsBlacklist + (hostname -> hostPortBlacklist)
+            log.warning(s"port blacklist is ${portsBlacklist}")
+            //remove the old task
+            tasks.remove(event.getStatus.getTaskId.getValue)
+            //TODO: don't allow launching on this allocated port for some time
+            promise.failure(new DockerLaunchFailure(event.getStatus.getMessage))
           case t =>
             log.warning(
               s"failing task ${event.getStatus.getTaskId.getValue} exception: ${t}  msg: ${event.getStatus.getMessage}")
-            //if (event.getStatus.getMessage == "Container exited with status 125"
             promise.failure(
               new MesosException(s"task in state ${event.getStatus.getState} msg: ${event.getStatus.getMessage}"))
         }
@@ -458,7 +474,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     acknowledge(event.getStatus)
   }
   def taskFitsHeldOffers(task: TaskDef): Boolean = {
-    taskMatcher.matchTasksToOffers(role, Seq(task), heldOffers.map(_._2.offer), taskBuilder)._1.nonEmpty
+    taskMatcher.matchTasksToOffers(role, Seq(task), heldOffers.map(_._2.offer), taskBuilder, portsBlacklist)._1.nonEmpty
   }
   def acknowledge(status: TaskStatus): Unit = {
     if (status.hasUuid) {
@@ -557,7 +573,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       }
 
       val (matchedTasks, remaining) = if (pending.nonEmpty && waitForAgent.isEmpty) {
-        taskMatcher.matchTasksToOffers(role, pending, event.getOffersList.asScala.toList, taskBuilder)
+        taskMatcher.matchTasksToOffers(role, pending, event.getOffersList.asScala.toList, taskBuilder, portsBlacklist)
       } else {
         waitForAgent.foreach(w => log.info(s"skipping offers due to waitForAgent ${w}"))
         //TODO: do not return empty map, it may cause errors on maxBy in caller!
@@ -912,6 +928,7 @@ class MesosClient(val id: () => String,
     with MesosClientHttpConnection {}
 
 object MesosClient {
+  val DOCKER_RUN_FAILURE_MESSAGE = "Container exited with status 125"
   protected[mesos] var frameworkID: Option[FrameworkID] = None
   protected[mesos] var frameworkState: FrameworkState = Starting
 
