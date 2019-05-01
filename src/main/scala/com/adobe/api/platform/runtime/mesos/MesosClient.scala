@@ -148,7 +148,8 @@ case class MesosActorConfig(agentStatsTTL: FiniteDuration,
                             holdOffers: Boolean,
                             holdOffersTTL: FiniteDuration,
                             holdOffersPruningPeriod: FiniteDuration,
-                            waitForPreferredAgent: Boolean)
+                            waitForPreferredAgent: Boolean,
+                            portBlacklistWarningThreshold: Int)
 case class AgentStats(mem: Double, cpu: Double, ports: Int, expiration: Instant)
 
 case class MesosAgentStats(stats: Map[String, AgentStats])
@@ -227,9 +228,11 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   case object PruneHeldOffers
   case object ReleaseHeldOffers
   case object MatchHeldOffers //used when submitting tasks, and periodically to refresh nodestats based on held offers
+  case object CheckPortBlacklist //check the size of port blacklist to warn about resource availability
 
   override def preStart() = {
     actorSystem.scheduler.schedule(30.seconds, config.agentStatsPruningPeriod, self, PruneStats)
+    actorSystem.scheduler.schedule(30.seconds, 30.seconds, self, CheckPortBlacklist)
     if (config.holdOffers) {
       actorSystem.scheduler.schedule(30.seconds, config.holdOffersPruningPeriod, self, PruneHeldOffers)
       //setup shutdown hook for releasing held offers
@@ -326,6 +329,12 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         logger.info(s"pruned ${toPrune.size} expired agent stats")
         //publish MesosAgentStats to subscribers
         listener.foreach(_ ! MesosAgentStats(agentOfferHistory))
+        //if agents had blacklisted ports, prune the blacklist as well
+        toPrune.keySet.foreach { k =>
+          if (portsBlacklist.keySet.contains(k)) {
+            logger.info(s"removing agent $k from ports blacklist since offers have not been seen")
+          }
+        }
       }
     case PruneHeldOffers =>
       //prune one offers that are > TTL old (will remove and trigger a new offer, so don't prune all at once)
@@ -362,6 +371,13 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         log.info(s"attempting to use ${heldOffers.size} held offers")
         //send empty offer list (held offers will be merged within handleOffers)
         handleOffers(Event.Offers.getDefaultInstance)
+      }
+    case CheckPortBlacklist =>
+      portsBlacklist.foreach { b =>
+        if (b._2.size > config.portBlacklistWarningThreshold) {
+          log.warning(
+            s"Ports blacklist on agent ${b._1} ${b._2.size} has exceeded ${config.portBlacklistWarningThreshold}; agent should be removed. Note that blacklist will NOT be cleared until framework restart.")
+        }
       }
     case msg => log.warning(s"unknown msg: ${msg}")
   }
