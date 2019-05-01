@@ -422,8 +422,10 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
             log.error(
               s"task ${event.getStatus.getTaskId.getValue} unexpectedly changed from TASK_RUNNING to ${toCompactJsonString(
                 event.getStatus)}")
-            val listener = sender() //TODO: allow client to provide the listener
-            listener ! Failed(taskId, event.getStatus.getAgentId.getValue)
+            val listener = sender()
+            if (listener != self) { //when testing, listener is not self
+              listener ! Failed(taskId, event.getStatus.getAgentId.getValue)
+            }
             tasks.remove(taskId)
           }
           case _ => {
