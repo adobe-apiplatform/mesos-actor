@@ -159,7 +159,8 @@ case class CapacityFailure(requiredMem: Float,
                            remainingResources: List[(Float, Float, Int)])
     extends MesosException("cluster does not have capacity")
 
-case class DockerLaunchFailure(msg: String) extends MesosException(s"docker launch failed: $msg")
+case class DockerRunFailure(msg: String) extends MesosException(s"docker launch failed: $msg")
+case class DockerPullFailure(msg: String) extends MesosException(s"docker pull failed: $msg")
 
 case class HeldOffer(offer: Offer, expiration: Instant)
 
@@ -389,18 +390,24 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
             log.info(
               s"task still launching task ${event.getStatus.getTaskId.getValue} (in state ${event.getStatus.getState}")
           case MesosTaskState.TASK_FAILED if event.getStatus.getMessage == MesosClient.DOCKER_RUN_FAILURE_MESSAGE =>
-            log.warning(toCompactJsonString(event))
+            //cause a retryable exception, and blacklist the port
             val port = hostports.headOption.getOrElse(0)
             log.warning(
               s"docker run failed for task ${event.getStatus.getTaskId.getValue} at $hostname:$port; port will be blacklisted; msg: ${event.getStatus.getMessage}")
             //update the blacklist
             val hostPortBlacklist = portsBlacklist.getOrElse(hostname, Seq.empty) :+ port
             portsBlacklist = portsBlacklist + (hostname -> hostPortBlacklist)
-            log.warning(s"port blacklist is ${portsBlacklist}")
+            log.info(s"port blacklist is ${portsBlacklist}")
             //remove the old task
             tasks.remove(event.getStatus.getTaskId.getValue)
-            //TODO: don't allow launching on this allocated port for some time
-            promise.failure(new DockerLaunchFailure(event.getStatus.getMessage))
+            //cause a retryable exception
+            promise.failure(new DockerRunFailure(event.getStatus.getMessage))
+          case MesosTaskState.TASK_FAILED
+              if event.getStatus.getMessage.startsWith(MesosClient.DOCKER_PULL_FAILURE_MESSAGE) =>
+            //remove the old task
+            tasks.remove(event.getStatus.getTaskId.getValue)
+            //cause a retryable exception, but do NOT blacklist the port (only image pull failed)
+            promise.failure(new DockerPullFailure(event.getStatus.getMessage))
           case t =>
             log.warning(
               s"failing task ${event.getStatus.getTaskId.getValue} exception: ${t}  msg: ${event.getStatus.getMessage}")
@@ -929,6 +936,8 @@ class MesosClient(val id: () => String,
 
 object MesosClient {
   val DOCKER_RUN_FAILURE_MESSAGE = "Container exited with status 125"
+  val DOCKER_PULL_FAILURE_MESSAGE =
+    "Failed to launch container: Failed to run 'docker -H unix:///var/run/docker.sock pull "
   protected[mesos] var frameworkID: Option[FrameworkID] = None
   protected[mesos] var frameworkState: FrameworkState = Starting
 
