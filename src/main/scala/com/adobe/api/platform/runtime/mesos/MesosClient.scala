@@ -333,6 +333,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         toPrune.keySet.foreach { k =>
           if (portsBlacklist.keySet.contains(k)) {
             logger.info(s"removing agent $k from ports blacklist since offers have not been seen")
+            portsBlacklist = portsBlacklist - k
           }
         }
       }
@@ -376,7 +377,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       portsBlacklist.foreach { b =>
         if (b._2.size > config.portBlacklistWarningThreshold) {
           log.warning(
-            s"Ports blacklist on agent ${b._1} ${b._2.size} has exceeded ${config.portBlacklistWarningThreshold}; agent should be removed. Note that blacklist will NOT be cleared until framework restart.")
+            s"Ports blacklist on agent ${b._1} ${b._2.size} has exceeded ${config.portBlacklistWarningThreshold}. (agent should be removed?)")
         }
       }
     case msg => log.warning(s"unknown msg: ${msg}")
