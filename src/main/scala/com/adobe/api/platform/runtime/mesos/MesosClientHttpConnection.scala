@@ -138,7 +138,7 @@ trait MesosClientHttpConnection extends MesosClientConnection {
       })
       .foreach(eventSource => {
         eventSource.runForeach(event => {
-          handleEvent(event)
+          self ! event //important! send events for serial processing
         })
       })
 
