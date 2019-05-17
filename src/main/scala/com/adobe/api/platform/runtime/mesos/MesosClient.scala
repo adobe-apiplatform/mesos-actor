@@ -320,6 +320,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     case event: Event.Update     => handleUpdate(event)
     case event: Event.Offers     => handleOffers(event)
     case event: Event.Subscribed => handleSubscribed(event)
+    case event: Event            => handleEvent(event)
     case Heartbeat               => handleHeartbeat()
     case PruneStats              =>
       //prune stats that are > TTL old (remove old/unseen agents' data)
@@ -640,9 +641,9 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       heldOffers = Map.empty
       if (config.holdOffers && !stopping) { //handle held offers
         //add remaining unused offers
-        if (unusedOfferIds.nonEmpty && config.holdOffers) {
+        if (unusedOfferIds.nonEmpty) {
           val now = Instant.now()
-          //find the usable ones but if this offer host is the least used host, do not hold it...
+          //find the usable ones (in agentOfferMap, and in unused list, but not in matches...
           val usableUnusedOffers =
             agentOfferMap.filter(
               a =>
@@ -650,14 +651,12 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
                   .contains(a._1.getId))
           //we may hold offers that were not accepted, but if we are waiting for a specific agent they wouldn't be used anyways...
           if (usableUnusedOffers.nonEmpty) {
-            logger.info(
-              s"holding ${usableUnusedOffers.size} unused offers: ${usableUnusedOffers.map(_._1.getHostname)}")
             //save the usable ones
-            usableUnusedOffers.foreach(
-              o =>
-                heldOffers = heldOffers + (o._1.getId -> HeldOffer(
-                  o._1,
-                  now.plusSeconds(config.holdOffersTTL.toSeconds))))
+            usableUnusedOffers.foreach { o =>
+              logger.info(
+                s"holding ${usableUnusedOffers.size} unused offers: ${o._1.getId.getValue + " " + o._1.getHostname}")
+              heldOffers = heldOffers + (o._1.getId -> HeldOffer(o._1, now.plusSeconds(config.holdOffersTTL.toSeconds)))
+            }
           }
 
           //remove the usable from unused
@@ -674,6 +673,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       }
 
       matchedTasks.foreach { offerTasks =>
+        logger.info(s"accepting offer ${offerTasks._1.getValue}")
         val taskInfos: java.lang.Iterable[TaskInfo] = offerTasks._2.map(_._1).asJava
         val acceptCall = MesosClient.accept(frameworkID, Seq(offerTasks._1).asJava, taskInfos)
         execInternal(acceptCall).onComplete {

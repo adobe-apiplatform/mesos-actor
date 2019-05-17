@@ -29,10 +29,12 @@ import akka.util.Timeout
 import com.adobe.api.platform.runtime.mesos._
 import org.apache.mesos.v1.Protos.AgentID
 import org.apache.mesos.v1.Protos.FrameworkID
+import org.apache.mesos.v1.Protos.OfferID
 import org.apache.mesos.v1.Protos.TaskID
 import org.apache.mesos.v1.Protos.TaskState
 import org.apache.mesos.v1.Protos.TaskStatus
 import org.apache.mesos.v1.scheduler.Protos.Call
+import org.apache.mesos.v1.scheduler.Protos.Event
 import org.junit.runner.RunWith
 import org.scalatest.BeforeAndAfterAll
 import org.scalatest.FlatSpecLike
@@ -792,6 +794,103 @@ class MesosClientTests
           .build())
       .build()
     expectMsg(Failure(DockerPullFailure(failMsg)))
+  }
+  it should "hold offers and remove them on RESCIND" in {
+    val statsListener = TestProbe()
+    val mesosClient = TestActorRef(new TestMesosClientActor(id, Some(statsListener.ref), this.testActor))
+
+    //subscribe
+    mesosClient ! Subscribe
+    mesosClient
+      .ask(Subscribe)(Timeout(1.second))
+      .mapTo[SubscribeComplete]
+      .onComplete(complete => {
+        system.log.info("subscribe completed successfully...")
+      })
+    expectMsg(subscribeCompleteMsg)
+
+    //receive offers
+    mesosClient ! ProtobufUtil.getOffers("/offer-multiple.json")
+
+    //verify agentOfferHistory
+    val stats = statsListener.expectMsgType[MesosAgentStats].stats
+
+    stats.size shouldBe 3
+    stats.keys shouldBe Set("192.168.99.100", "192.168.99.101", "192.168.99.102")
+    stats.foreach(_ match {
+      case ("192.168.99.100", AgentStats(mem, cpus, ports, _)) =>
+        cpus shouldBe 0.8
+        ports shouldBe 199
+        mem shouldBe 2912.0
+      case ("192.168.99.101", AgentStats(mem, cpus, ports, _)) =>
+        cpus shouldBe 1.0
+        ports shouldBe 199
+        mem shouldBe 2901.0
+
+      case ("192.168.99.102", AgentStats(mem, cpus, ports, _)) =>
+        cpus shouldBe 0.9
+        ports shouldBe 199
+        mem shouldBe 2902.0
+      case _ => fail("unexpected offer host!")
+    })
+
+    //send RESCIND
+    val rescind = Event
+      .newBuilder()
+      .setType(Event.Type.RESCIND)
+      .setRescind(
+        Event.Rescind
+          .newBuilder()
+          .setOfferId(OfferID.newBuilder().setValue("7168e411-c3e4-4e29-b292-9b12eda4aaca-O61"))
+          .build())
+      .build()
+    mesosClient ! rescind
+    //send RESCIND
+    val rescind2 = Event
+      .newBuilder()
+      .setType(Event.Type.RESCIND)
+      .setRescind(
+        Event.Rescind
+          .newBuilder()
+          .setOfferId(OfferID.newBuilder().setValue("7168e411-c3e4-4e29-b292-9b12eda4aaca-O60"))
+          .build())
+      .build()
+    mesosClient ! rescind2
+    //send RESCIND
+    val rescind3 = Event
+      .newBuilder()
+      .setType(Event.Type.RESCIND)
+      .setRescind(
+        Event.Rescind
+          .newBuilder()
+          .setOfferId(OfferID.newBuilder().setValue("7168e411-c3e4-4e29-b292-9b12eda4aaca-O59"))
+          .build())
+      .build()
+    mesosClient ! rescind3
+    //send RESCIND
+    val rescind4 = Event
+      .newBuilder()
+      .setType(Event.Type.RESCIND)
+      .setRescind(
+        Event.Rescind
+          .newBuilder()
+          .setOfferId(OfferID.newBuilder().setValue("7168e411-c3e4-4e29-b292-9b12eda4aaca-O58"))
+          .build())
+      .build()
+    mesosClient ! rescind4
+    //submit the task
+    mesosClient ! SubmitTask(
+      TaskDef(
+        "taskId1",
+        "taskId1",
+        "fake-docker-image",
+        0.1,
+        256,
+        List(8080),
+        healthCheckParams = Some(HealthCheckConfig(healthCheckPortIndex = 0)),
+        commandDef = Some(CommandDef(environment = Map("__OW_API_HOST" -> "192.168.99.100")))))
+    //expaect no launch because offers were rescinded
+    expectNoMsg()
   }
   class TestMesosClientActor(override val id: () => String,
                              override val listener: Option[ActorRef] = None,
