@@ -20,8 +20,8 @@ repositories {
 
 ext {
     scalaVersion = "2.12"
-    akkaVersion = "2.5.3"
-    akkaHttpVersion = "10.0.6"
+    akkaVersion = "2.5.22"
+    akkaHttpVersion = "10.1.8"
 }
 dependencies {
     compile "org.scala-lang:scala-library:${gradle.scala.version}"
