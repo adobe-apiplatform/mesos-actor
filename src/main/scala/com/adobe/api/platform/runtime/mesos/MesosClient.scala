@@ -597,12 +597,12 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         }
       }
 
-      val (matchedTasks, remaining) = if (pending.nonEmpty && waitForAgent.isEmpty) {
+      val (matchedTasks, remaining, toDecline) = if (pending.nonEmpty && waitForAgent.isEmpty) {
         taskMatcher.matchTasksToOffers(role, pending, event.getOffersList.asScala.toList, taskBuilder, portsBlacklist)
       } else {
         waitForAgent.foreach(w => log.info(s"skipping offers due to waitForAgent ${w}"))
         //TODO: do not return empty map, it may cause errors on maxBy in caller!
-        (Map.empty[OfferID, Seq[(TaskInfo, Seq[Int])]], Map.empty[OfferID, (Float, Float, Int)])
+        (Map.empty[OfferID, Seq[(TaskInfo, Seq[Int])]], Map.empty[OfferID, (Float, Float, Int)], Set.empty[OfferID])
       }
 
       if (matchedTasks.nonEmpty && config.waitForPreferredAgent) {
@@ -637,15 +637,15 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         asScalaBuffer(event.getOffersList).map(offer => offer.getId).filter(!matchedTasks.contains(_))
       //do not refill heldOffers if we are stopping
       if (config.holdOffers && !stopping) { //handle held offers
-        //remove matched offers from heldOffers
-        heldOffers = heldOffers.filter(h => !matchedTasks.keySet.contains(h._1))
+        //remove matched (or toDelete) offers from heldOffers
+        heldOffers = heldOffers.filter(h => !matchedTasks.keySet.contains(h._1) && !toDecline.contains(h._1))
         //add remaining unused offers
         //find the usable ones (in agentOfferMap, and in unused list, but not in matches...
         val usableUnusedOffers =
           agentOfferMap.filter(
             a =>
               unusedOfferIds.contains(a._1.getId) && !matchedTasks.keySet
-                .contains(a._1.getId))
+                .contains(a._1.getId) && !toDecline.contains(a._1.getId))
         //we may hold offers that were not accepted, but if we are waiting for a specific agent they wouldn't be used anyways...
         if (usableUnusedOffers.nonEmpty) {
           //save the usable ones, if not already saved
