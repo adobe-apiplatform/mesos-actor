@@ -31,16 +31,16 @@ trait TaskMatcher {
                          t: Iterable[TaskDef],
                          o: Iterable[Offer],
                          builder: TaskBuilder,
-                         portBlacklist: Map[String, Seq[Int]])(
-    implicit logger: LoggingAdapter): (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)], Set[OfferID])
+                         portBlacklist: Map[String, Seq[Int]])(implicit logger: LoggingAdapter)
+    : (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)], Set[OfferID])
 }
 class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatcher {
   override def matchTasksToOffers(role: String,
                                   t: Iterable[TaskDef],
                                   o: Iterable[Offer],
                                   builder: TaskBuilder,
-                                  portBlacklist: Map[String, Seq[Int]])(
-    implicit logger: LoggingAdapter): (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)], Set[OfferID]) = {
+                                  portBlacklist: Map[String, Seq[Int]])(implicit logger: LoggingAdapter)
+    : (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)], Set[OfferID]) = {
     //we can launch many tasks on a single offer
 
     var tasksInNeed: ListBuffer[TaskDef] = t.to[ListBuffer]
@@ -125,7 +125,8 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
               val matchedConstraints = !constraintChecks.exists(_._1 == false)
 
               if (!matchedConstraints) {
-                logger.debug(s"offer did not match constraints of task ${task.taskId} ${task.constraints} (${offer.getAttributesList}) ")
+                logger.debug(
+                  s"offer did not match constraints of task ${task.taskId} ${task.constraints} (${offer.getAttributesList}) ")
                 toDecline = toDecline + offer.getId
               } else if (!matchedResources) {
                 logger.info(
