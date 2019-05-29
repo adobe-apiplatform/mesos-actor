@@ -31,16 +31,16 @@ trait TaskMatcher {
                          t: Iterable[TaskDef],
                          o: Iterable[Offer],
                          builder: TaskBuilder,
-                         portBlacklist: Map[String, Seq[Int]])(
-    implicit logger: LoggingAdapter): (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)])
+                         portBlacklist: Map[String, Seq[Int]])(implicit logger: LoggingAdapter)
+    : (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)], Set[OfferID])
 }
 class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatcher {
   override def matchTasksToOffers(role: String,
                                   t: Iterable[TaskDef],
                                   o: Iterable[Offer],
                                   builder: TaskBuilder,
-                                  portBlacklist: Map[String, Seq[Int]])(
-    implicit logger: LoggingAdapter): (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)]) = {
+                                  portBlacklist: Map[String, Seq[Int]])(implicit logger: LoggingAdapter)
+    : (Map[OfferID, Seq[(TaskInfo, Seq[Int])]], Map[OfferID, (Float, Float, Int)], Set[OfferID]) = {
     //we can launch many tasks on a single offer
 
     var tasksInNeed: ListBuffer[TaskDef] = t.to[ListBuffer]
@@ -56,6 +56,7 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
           .map(_.getScalar.getValue))
     logger.info(s"sorted offers ${sortedOffers.map(_.getHostname)}")
     var remaining: Map[OfferID, (Float, Float, Int)] = Map.empty
+    var toDecline: Set[OfferID] = Set.empty
     sortedOffers.foreach(offer => {
       try {
         //for testing worst case scenario...
@@ -124,11 +125,16 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
               val matchedConstraints = !constraintChecks.exists(_._1 == false)
 
               if (!matchedConstraints) {
-                logger.debug(s"offer did not match constraints ${task.constraints} (${offer.getAttributesList}) ")
+                logger.debug(
+                  s"offer did not match constraints of task ${task.taskId} ${task.constraints} (${offer.getAttributesList}) ")
+                toDecline = toDecline + offer.getId
               } else if (!matchedResources) {
                 logger.info(
-                  s"offer did not match resource requirements cpu:${taskCpus} (${remainingOfferCpus}), mem: ${taskMem}  (${remainingOfferMem}), ports: ${task.ports.size} (${hostPorts.size})")
+                  s"offer ${offer.getId.getValue} did not match resource requirements of task ${task.taskId} cpu:${taskCpus} (${remainingOfferCpus}), mem: ${taskMem}  (${remainingOfferMem}), ports: ${task.ports.size} (${hostPorts.size})")
+                toDecline = toDecline + offer.getId
               } else {
+                //remove it from declined (in case a previous task declined it)
+                toDecline = toDecline - offer.getId
                 //mark resources as used
                 remainingOfferCpus -= taskCpus
                 remainingOfferMem -= taskMem
@@ -205,7 +211,7 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
         case t: Exception => logger.error(s"task matching failed, ignoring offer ${offer.getId} ${t}")
       }
     })
-    (result, remaining)
+    (result, remaining, toDecline)
   }
 
   def pluckPorts(rangesList: Iterable[org.apache.mesos.v1.Protos.Value.Ranges],
