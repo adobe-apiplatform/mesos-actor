@@ -50,6 +50,7 @@ import pureconfig.loadConfigOrThrow
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.Buffer
+import scala.collection.immutable
 import scala.concurrent.ExecutionContext
 import scala.concurrent.Future
 import scala.concurrent.Promise
@@ -182,7 +183,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   val autoSubscribe: Boolean
   val tasks: TaskStore
   val refuseSeconds: Double
-  var reconcilationData: mutable.Map[String, ReconcileTaskState] = mutable.Map()
+  var pendingReconcilationData: immutable.Map[String, ReconcileTaskState] = Map.empty
   var heartbeatTimeout: FiniteDuration = 60.seconds //will be reset by Subscribed message
   val heartbeatMaxFailures: Int
   var heartbeatMonitor: Option[Cancellable] = None
@@ -207,20 +208,16 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
       .mapTo[SubscribeComplete]
       .onComplete(complete => {
         log.info("subscribe completed successfully...")
-        reconcilationData = mutable.Map() ++ tasks.reconcileData
-        log.info(s"reconciliation data ${reconcilationData}")
-        val recoveryData = reconcilationData.map(t => TaskRecoveryDetail(t._1, t._2.agentId))
-        if (!recoveryData.isEmpty) {
-          log.info(s"reconciling ${recoveryData.size} tasks")
-          recoveryData.foreach(d => {
-            log.info(s"           ${d.taskId} -> ${d.agentId}")
-          })
-          reconcile(recoveryData)
-        }
+        tasks.reconcileData
+          .map { reconciliationData =>
+            StartReconcile(reconciliationData)
+          }
+          .pipeTo(self)
         //we also may have unlaunched tasks that should proceed with launch as part of autosubscribe process
-        val toLaunchAtReconcile = tasks.reconcilePendingData
-        toLaunchAtReconcile.foreach { t =>
-          self ! SubmitTask(t._2.taskDef)
+        tasks.reconcilePendingData.map {
+          _.foreach { t =>
+            self ! SubmitTask(t._2.taskDef)
+          }
         }
       })
   }
@@ -229,6 +226,7 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
   case object ReleaseHeldOffers
   case object MatchHeldOffers //used when submitting tasks, and periodically to refresh nodestats based on held offers
   case object CheckPortBlacklist //check the size of port blacklist to warn about resource availability
+  case class StartReconcile(data: Map[String, ReconcileTaskState])
 
   override def preStart() = {
     actorSystem.scheduler.schedule(30.seconds, config.agentStatsPruningPeriod, self, PruneStats)
@@ -379,6 +377,22 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
             s"Ports blacklist on agent ${b._1} ${b._2.size} has exceeded ${config.portBlacklistWarningThreshold}. (agent should be removed?)")
         }
       }
+    case StartReconcile(reconciliationData) =>
+      if (pendingReconcilationData.nonEmpty) {
+        log.warning(s"previous reconcile was not complete (${pendingReconcilationData.size} pending")
+        pendingReconcilationData = pendingReconcilationData ++ reconciliationData
+      } else {
+        pendingReconcilationData = reconciliationData
+      }
+
+      val recoveryData = reconciliationData.map(t => TaskRecoveryDetail(t._1, t._2.agentId))
+      if (recoveryData.nonEmpty) {
+        log.info(s"reconciling ${recoveryData.size} tasks")
+        recoveryData.foreach(d => {
+          log.info(s"           ${d.taskId} -> ${d.agentId}")
+        })
+        reconcile(recoveryData)
+      }
     case msg => log.warning(s"unknown msg: ${msg}")
   }
 
@@ -473,8 +487,10 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         event.getStatus.getState match {
           case MesosTaskState.TASK_RUNNING =>
             log.info(s"recovered task id ${taskId} in state ${event.getStatus.getState}")
-            reconcilationData.remove(taskId) match {
+            pendingReconcilationData.get(taskId) match {
               case Some(taskReconcileData) =>
+                pendingReconcilationData = pendingReconcilationData - taskId
+                log.info(s"${pendingReconcilationData.size} more tasks remaining to reconcile")
                 tasks.update(
                   taskId,
                   Running(
@@ -682,8 +698,10 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
           case Failure(t) =>
             log.error(s"accept failure ${t}")
             offerTasks._2.foreach(task => {
-              tasks(task._1.getTaskId.getValue) match {
-                case s @ Submitted(pending, taskInfo, offer, hostname, hostports, promise) =>
+              val failedTaskId = task._1.getTaskId.getValue
+              tasks.get(failedTaskId) match {
+                case Some(Submitted(_, _, _, _, _, promise)) =>
+                  tasks.remove(failedTaskId)
                   promise.failure(t)
                 case previousState =>
                   log.warning(s"accepted a task that was not in Submitted? ${previousState}")
@@ -692,8 +710,8 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         }
         //immediately update tasks to Submitted status
         offerTasks._2.foreach(task => {
-          tasks(task._1.getTaskId.getValue) match {
-            case s @ SubmitPending(reqs, promise, _) =>
+          tasks.get(task._1.getTaskId.getValue) match {
+            case Some(s @ SubmitPending(reqs, promise, _)) =>
               //dig the hostname out of the offer whose agent id matches the agent id in the task info
               val hostname =
                 event.getOffersList.asScala.find(p => p.getAgentId == task._1.getAgentId).get.getHostname
