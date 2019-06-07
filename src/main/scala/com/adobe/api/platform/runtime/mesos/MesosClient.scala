@@ -701,11 +701,12 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
               val failedTaskId = task._1.getTaskId.getValue
               tasks.get(failedTaskId) match {
                 case Some(Submitted(_, _, _, _, _, promise)) =>
-                  tasks.remove(failedTaskId)
                   promise.failure(t)
                 case previousState =>
                   log.warning(s"accepted a task that was not in Submitted? ${previousState}")
               }
+              //remove the task in all cases
+              tasks.remove(failedTaskId)
             })
         }
         //immediately update tasks to Submitted status

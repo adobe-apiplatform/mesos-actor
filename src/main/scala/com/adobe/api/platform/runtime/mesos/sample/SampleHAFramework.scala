@@ -76,7 +76,7 @@ object SampleHAFramework {
     AkkaManagement(system).start()
     ClusterBootstrap(system).start()
     //create task store
-    val taskStore = new DistributedDataTaskStore(system)
+    val tasks = new DistributedDataTaskStore(system)
 
     //create the singleton MesosClient actor
     system.actorOf(
@@ -88,7 +88,7 @@ object SampleHAFramework {
           "sample-role",
           30.seconds,
           autoSubscribe = true,
-          taskStore = taskStore),
+          taskStore = tasks),
         terminationMessage = PoisonPill,
         settings = ClusterSingletonManagerSettings(system)),
       name = "mesosClientMaster")
@@ -146,10 +146,10 @@ object SampleHAFramework {
         launches.onComplete(f => {
           //schedule delete in 30 seconds, for ALL tasks
           system.scheduler.scheduleOnce(60.seconds) {
-            if (taskStore.isEmpty) {
+            if (tasks.isEmpty) {
               log.info("this cluster is not the framework - tasks will be killed by the framework node")
             } else {
-              taskStore.foreach(t => {
+              tasks.foreach(t => {
                 log.info(s"removing previously created task ${t._1}")
                 mesosClientActor
                   .ask(DeleteTask(t._1))(taskDeleteTimeout)
