@@ -72,6 +72,7 @@ class DefaultTaskBuilder extends TaskBuilder {
           .setDocker(
             DockerInfo.newBuilder
               .setImage(reqs.dockerImage)
+              .setForcePullImage(reqs.forcePull)
               .setNetwork(dockerNetwork)
               .addAllParameters(parameters)
               .addAllPortMappings(portMappings.asJava)

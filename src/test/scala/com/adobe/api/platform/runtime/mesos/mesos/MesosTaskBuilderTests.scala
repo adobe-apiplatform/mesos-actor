@@ -69,6 +69,7 @@ class MesosTaskBuilderTests extends FlatSpec with Matchers {
     taskInfo.getTaskId.getValue shouldBe taskDef.taskId
     taskInfo.getName shouldBe taskDef.taskName
     taskInfo.getContainer.getDocker.getImage shouldBe taskDef.dockerImage
+    taskInfo.getContainer.getDocker.getForcePullImage shouldBe true
     taskInfo.getResources(0).getName shouldBe "cpus"
     taskInfo.getResources(0).getScalar.getValue shouldBe taskDef.cpus
     taskInfo.getContainer.getNetworkInfos(0).getName shouldBe "usernet"
