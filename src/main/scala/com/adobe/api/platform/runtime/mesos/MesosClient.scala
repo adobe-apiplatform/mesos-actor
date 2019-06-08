@@ -341,13 +341,11 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
     case PruneHeldOffers =>
       //prune one offers that are > TTL old (will remove and trigger a new offer, so don't prune all at once)
       val now = Instant.now()
-      val expired = heldOffers.filter(_._2.expiration.isBefore(now))
-      if (expired.nonEmpty) {
-        //prune only the oldest one per pruning (so that we retain some held offers at all times, if possible)
-        val expiredOffer = expired.minBy(_._2.expiration)._1
-        declineOffers(Seq(expiredOffer))
-        heldOffers = heldOffers - expiredOffer
-        logger.info(s"pruned 1 held offers")
+      val expiredIds = heldOffers.filter(_._2.expiration.isBefore(now)).keys
+      if (expiredIds.nonEmpty) {
+        declineOffers(expiredIds)
+        heldOffers = heldOffers -- expiredIds
+        logger.info(s"pruned ${expiredIds.size} held offers")
       }
     case ReleaseHeldOffers =>
       if (heldOffers.nonEmpty) {
@@ -599,12 +597,12 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
         }
       }
 
-      val (matchedTasks, remaining) = if (pending.nonEmpty && waitForAgent.isEmpty) {
+      val (matchedTasks, remaining, toDecline) = if (pending.nonEmpty && waitForAgent.isEmpty) {
         taskMatcher.matchTasksToOffers(role, pending, event.getOffersList.asScala.toList, taskBuilder, portsBlacklist)
       } else {
         waitForAgent.foreach(w => log.info(s"skipping offers due to waitForAgent ${w}"))
         //TODO: do not return empty map, it may cause errors on maxBy in caller!
-        (Map.empty[OfferID, Seq[(TaskInfo, Seq[Int])]], Map.empty[OfferID, (Float, Float, Int)])
+        (Map.empty[OfferID, Seq[(TaskInfo, Seq[Int])]], Map.empty[OfferID, (Float, Float, Int)], Set.empty[OfferID])
       }
 
       if (matchedTasks.nonEmpty && config.waitForPreferredAgent) {
@@ -634,41 +632,43 @@ trait MesosClientActor extends Actor with ActorLogging with MesosClientConnectio
 
       //if some tasks matched, we explicitly accept the matched offers, and others are explicitly declined
 
-      //Decline the offers not selected. Sometimes these just stay dangling in mesos outstanding offers
+      //Decline the offers not selected.
       val unusedOfferIds =
         asScalaBuffer(event.getOffersList).map(offer => offer.getId).filter(!matchedTasks.contains(_))
       //do not refill heldOffers if we are stopping
-      heldOffers = Map.empty
       if (config.holdOffers && !stopping) { //handle held offers
+        //remove matched (or toDelete) offers from heldOffers
+        heldOffers = heldOffers.filter(h => !matchedTasks.keySet.contains(h._1) && !toDecline.contains(h._1))
         //add remaining unused offers
-        if (unusedOfferIds.nonEmpty) {
+        //find the usable ones (in agentOfferMap, and in unused list, but not in matches...
+        val usableUnusedOffers =
+          agentOfferMap.filter(
+            a =>
+              unusedOfferIds.contains(a._1.getId) && !matchedTasks.keySet
+                .contains(a._1.getId) && !toDecline.contains(a._1.getId))
+        //we may hold offers that were not accepted, but if we are waiting for a specific agent they wouldn't be used anyways...
+        if (usableUnusedOffers.nonEmpty) {
+          //save the usable ones, if not already saved
           val now = Instant.now()
-          //find the usable ones (in agentOfferMap, and in unused list, but not in matches...
-          val usableUnusedOffers =
-            agentOfferMap.filter(
-              a =>
-                unusedOfferIds.contains(a._1.getId) && !matchedTasks.keySet
-                  .contains(a._1.getId))
-          //we may hold offers that were not accepted, but if we are waiting for a specific agent they wouldn't be used anyways...
-          if (usableUnusedOffers.nonEmpty) {
-            //save the usable ones
-            usableUnusedOffers.foreach { o =>
-              logger.info(
-                s"holding ${usableUnusedOffers.size} unused offers: ${o._1.getId.getValue + " " + o._1.getHostname}")
+          usableUnusedOffers.foreach { o =>
+            if (!heldOffers.contains(o._1.getId)) {
+              logger.info(s"holding new unused offers: ${o._1.getId.getValue + " " + o._1.getHostname}")
               heldOffers = heldOffers + (o._1.getId -> HeldOffer(o._1, now.plusSeconds(config.holdOffersTTL.toSeconds)))
             }
           }
+          logger.info(s"holding ${heldOffers.size} total unused offers")
+        }
 
-          //remove the usable from unused
-          val unusableUnusedOfferIds = unusedOfferIds -- heldOffers.keys
-          //decline unused - usableUnused
-          if (unusableUnusedOfferIds.nonEmpty) {
-            logger.info(s"declining ${unusableUnusedOfferIds.size} unused or unusable offers")
-            declineOffers(unusableUnusedOfferIds)
-          }
+        //remove the usable from unused
+        val unusableUnusedOfferIds = unusedOfferIds -- heldOffers.keys
+        //decline unused - usableUnused
+        if (unusableUnusedOfferIds.nonEmpty) {
+          logger.info(s"declining ${unusableUnusedOfferIds.size} unused or unusable offers")
+          declineOffers(unusableUnusedOfferIds)
         }
       } else {
         logger.info(s"declining ${unusedOfferIds.size} unused offers")
+        heldOffers = Map.empty
         declineOffers(unusedOfferIds)
       }
 
