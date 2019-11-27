@@ -39,8 +39,8 @@ dependencies {
     compile "com.typesafe.akka:akka-http_${scalaVersion}:${akkaHttpVersion}"
 
     //akka-management + akka-discovery
-    compile "com.lightbend.akka.management:akka-management-cluster-bootstrap_${scalaVersion}:0.10.0"
-    compile "com.lightbend.akka.discovery:akka-discovery-marathon-api_${scalaVersion}:0.10.0"
+    compile "com.lightbend.akka.management:akka-management-cluster-bootstrap_${scalaVersion}:1.0.5"
+    compile "com.lightbend.akka.discovery:akka-discovery-marathon-api_${scalaVersion}:1.0.5"
 
     //for mesos
     compile "org.apache.mesos:mesos:1.2.3"
@@ -49,7 +49,7 @@ dependencies {
     //for JSON printing of protobuf
     compile "com.google.protobuf:protobuf-java-util:3.6.1"
     //pureconfig for...config
-    compile("com.github.pureconfig:pureconfig_2.12:0.12.1") {
+    compile("com.github.pureconfig:pureconfig_2.12:0.11.1") {
         exclude group: "org.scala-lang", module: "scala-compiler"
         exclude group: "org.scala-lang", module: "scala-reflect"
     }

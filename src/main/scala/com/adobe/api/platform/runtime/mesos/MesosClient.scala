@@ -991,7 +991,7 @@ object MesosClient {
             refuseSeconds: Double = 5.0,
             heartbeatMaxFailures: Int = 2,
             listener: Option[ActorRef] = None,
-            config: MesosActorConfig = ConfigSource.default.at("mesos-actor").loadOrThrow[MesosActorConfig]): Props =
+            config: MesosActorConfig = loadConfigOrThrow[MesosActorConfig]("mesos-actor")): Props =
     Props(
       new MesosClient(
         id,
