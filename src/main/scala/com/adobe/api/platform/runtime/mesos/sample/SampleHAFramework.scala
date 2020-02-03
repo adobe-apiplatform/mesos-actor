@@ -35,7 +35,7 @@ import akka.cluster.singleton.ClusterSingletonManager
 import akka.cluster.singleton.ClusterSingletonManagerSettings
 import akka.cluster.singleton.ClusterSingletonProxy
 import akka.cluster.singleton.ClusterSingletonProxySettings
-import akka.management.AkkaManagement
+import akka.management.scaladsl.AkkaManagement
 import akka.management.cluster.bootstrap.ClusterBootstrap
 import akka.pattern.ask
 import akka.util.Timeout
