@@ -49,7 +49,7 @@ dependencies {
     //for JSON printing of protobuf
     compile "com.google.protobuf:protobuf-java-util:3.6.1"
     //pureconfig for...config
-    compile("com.github.pureconfig:pureconfig_2.12:0.9.0") {
+    compile("com.github.pureconfig:pureconfig_2.12:0.11.1") {
         exclude group: "org.scala-lang", module: "scala-compiler"
         exclude group: "org.scala-lang", module: "scala-reflect"
     }
