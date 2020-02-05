@@ -119,8 +119,8 @@ class DefaultTaskMatcher(isValid: Offer => Boolean = _ => true) extends TaskMatc
                 task.ports.size,
                 usedPorts ++ portBlacklist
                   .getOrElse(offer.getHostname, Seq.empty)) //exclude used ports and blacklisted ports
-              val matchedResources = remainingOfferCpus > taskCpus &&
-                remainingOfferMem > taskMem &&
+              val matchedResources = remainingOfferCpus >= taskCpus &&
+                remainingOfferMem >= taskMem &&
                 hostPorts.size == task.ports.size
               val matchedConstraints = !constraintChecks.exists(_._1 == false)
 
