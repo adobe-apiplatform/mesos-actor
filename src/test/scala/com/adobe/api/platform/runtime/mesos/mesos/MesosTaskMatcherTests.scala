@@ -169,6 +169,36 @@ class MesosTaskMatcherTests extends FlatSpec with Matchers {
 
   }
 
+  it should "only use the (multiple) slaves with least available mem and exact resource match" in {
+    val offers = ProtobufUtil.getOffers("/offer-multiple-exact.json")
+
+    val tasks = List[TaskDef](
+      TaskDef("taskId", "taskName", "dockerImage:someTag", 0.5, 256, List(8080)),
+      TaskDef("taskId2", "taskName2", "dockerImage:someTag2", 0.6, 512, List(8080)))
+    val (taskMap, remaining,_) =
+      new DefaultTaskMatcher().matchTasksToOffers(
+        "*",
+        tasks,
+        offers.getOffersList.asScala,
+        new DefaultTaskBuilder(),
+        Map.empty)
+
+    taskMap.size shouldBe 2
+    //validate port selection
+    taskMap.values.flatMap(a => a.flatMap(_._2)) shouldBe Seq(12001, 11001)
+    //validate agent ids
+    taskMap.keys.map(_.getValue) shouldBe Set(
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O59",
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O60")
+
+    remaining.map(r => r._1.getValue -> r._2) shouldBe Map(
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O58" -> (2912.0.toFloat, 0.8.toFloat, 199),
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O59" -> (0.toFloat, 0.toFloat, 0),//exact match used all resources of the offer
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O60" -> (0.toFloat, 0.toFloat, 0),//exact match used all resources of the offer
+      "7168e411-c3e4-4e29-b292-9b12eda4aaca-O61" -> (2902.0.toFloat, 0.9.toFloat, 199))
+
+  }
+
   it should "not match ports in the blacklist" in {
     val offers = ProtobufUtil.getOffers("/offer-multiple.json")
 

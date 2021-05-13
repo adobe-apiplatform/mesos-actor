@@ -46,7 +46,7 @@ import org.apache.mesos.v1.scheduler.Protos.Call
 import org.apache.mesos.v1.scheduler.Protos.Call._
 import org.apache.mesos.v1.scheduler.Protos.Event
 import pureconfig._
-import pureconfig.loadConfigOrThrow
+import pureconfig.generic.auto._
 import scala.collection.JavaConverters._
 import scala.collection.mutable
 import scala.collection.mutable.Buffer
